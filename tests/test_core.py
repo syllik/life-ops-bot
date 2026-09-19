@@ -70,7 +70,7 @@ async def test_done_and_later_delegate_state_changes() -> None:
     life_ops = LifeOps(store)
 
     done = await life_ops.done(7)
-    later = await life_ops.ater(8)
+    later = await life_ops.later(8)
 
     assert done.state == "closed"
     assert later.labels == ("state:later",)
@@ -83,7 +83,7 @@ def test_make_title_is_deterministic_and_bounded() -> None:
     assert make_title("   ") == "Telegram capture"
     title = make_title("x" * 100)
     assert len(title) == 80
-    assert title.endswith"…")
+    assert title.endswith("…")
 
 
 def test_make_issue_body_omits_forward_line_for_normal_message() -> None:
