@@ -98,6 +98,21 @@ Next navigation:
 
 Do not build a Mini App for MVP.
 
+## Testing
+
+Testing is part of implementation, not a follow-up phase.
+
+Every functional change must include automated tests that cover its observable behavior, including:
+- normal success paths
+- authorization and privacy boundaries
+- external-service failures
+- parser/classifier fallbacks
+- GitHub mapping and mutations
+- Telegram actions/callbacks
+- reminder/state transitions when those features are added
+
+Tests should be deterministic and run without real production credentials by using adapter fakes/mocks. Add integration tests for important adapter contracts where practical.
+
 ## Reminders
 
 Reminder support is a later phase after capture/navigation.
