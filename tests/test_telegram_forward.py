@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
@@ -62,7 +62,7 @@ def fake_callback(*, user_id: int = 123, data: str | None = "done:42"):
     )
 
 def test_describe_forward_origin_variants() -> None:
-    dt = datetime.now(timezone.utc)
+    dt = datetime.now(UTC)
     user = User(id=1, is_bot=False, first_name="Alice", username="alice")
     chat = Chat(id=-10, type="group", title="Group")
     channel = Chat(id=-20, type="channel", title="Channel")
