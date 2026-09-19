@@ -28,6 +28,7 @@ def make_client(handler) -> httpx.AsyncClient:
         base_url="https://api.github.com", transport=httpx.MockTransport(handler)
     )
 
+
 @pytest.mark.asyncio
 async def test_close_issue_is_repeatable_state_setting_operation() -> None:
     requests = 0
@@ -65,7 +66,11 @@ async def test_set_later_replaces_only_conflicting_state_labels() -> None:
             200,
             json=issue_json(
                 8,
-                labels=[{"name": "area:software"}, {"name": "type:task"}, {"name": "state:later"}],
+                labels=[
+                    {"name": "area:software"},
+                    {"name": "type:task"},
+                    {"name": "state:later"},
+                ],
             ),
         )
 
@@ -91,6 +96,7 @@ async def test_set_later_is_noop_when_already_later() -> None:
         issue = await github.set_later(8)
     assert issue.labels == ("state:later",)
 
+
 @pytest.mark.asyncio
 async def test_close_rejects_false_success_response() -> None:
     async with make_client(
@@ -110,10 +116,11 @@ async def test_later_rejects_conflicting_state_response() -> None:
         calls += 1
         if calls == 1:
             return httpx.Response(200, json=issue_json(8, labels=[{"name": "state:now"}]))
-        return htttpx.Response(
+        return httpx.Response(
             200,
             json=issue_json(
-                8, labels=[{"name": "state:later"}, {"name": "state:waiting"}]
+                8,
+                labels=[{"name": "state:later"}, {"name": "state:waiting"}],
             ),
         )
 
