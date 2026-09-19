@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from .core import Issue, LATER_LABEL, STATE_PREFIX
+from .core import LATER_LABEL, STATE_PREFIX, Issue
 
 
 class GitHubError(RuntimeError):
@@ -88,7 +88,8 @@ class GitHubIssues:
         )
         current = _json_object(current_response)
         labels = _label_names(current.get("labels", []))
-        next_labels = tuple(label for label in labels if not label.startswith(STATE_PREFIX)) + (
+        next_labels = (
+            *(label for label in labels if not label.startswith(STATE_PREFIX)),
             LATER_LABEL,
         )
         if tuple(labels) == next_labels:
