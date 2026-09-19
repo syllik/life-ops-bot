@@ -19,6 +19,16 @@ This repository contains the public Telegram client for the private `syllik/life
 - Reject unauthorized updates before LLM calls, GitHub writes, logs containing message bodies, or any other processing.
 - Never log or commit tokens, secrets, recovery codes, private keys, or private Life Ops content unnecessarily.
 
+## Testing policy
+
+- Every behavior added to the project must be covered by automated tests in the same change.
+- Do not defer tests to a later cleanup phase.
+- Cover happy paths, failure paths, authorization boundaries, fallbacks, mapping logic, and state-changing actions.
+- External systems must be exercised through adapters/fakes in unit tests so tests are deterministic and do not require real Telegram, GitHub, or LLM credentials.
+- Add integration tests around adapter contracts where practical.
+- A change is not considered complete while meaningful behavior introduced by that change remains untested.
+- Avoid tests that merely mirror implementation details; test observable behavior and invariants.
+
 ## MVP boundaries
 
 First vertical slice:
@@ -40,7 +50,6 @@ Then add navigation. Reminders come after basic capture/navigation is stable.
 - Keep the LLM provider behind a small replaceable interface.
 - Keep GitHub access behind a small adapter.
 - The core domain should not depend directly on Telegram or a specific LLM provider.
-- Tests should cover authorization before side effects, parser fallbacks, GitHub mapping, and idempotent actions where relevant.
 - Do not use a trusted self-hosted runner for untrusted public pull requests.
 
 ## Upstream / analogues
