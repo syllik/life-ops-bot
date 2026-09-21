@@ -5,7 +5,11 @@ from typing import Any
 
 import httpx
 
-from .core import LATER_LABEL, STATE_PREFIX, Issue
+from .core import INBOX_LABEL, LATER_LABEL, STATE_PREFIX, Issue
+
+REQUIRED_LABELS = (INBOX_LABEL, LATER_LABEL)
+BOOTSTRAP_LABEL_COLOR = "ededed"
+BOOTSTRAP_LABEL_DESCRIPTION = "Managed by life-ops-bot."
 
 
 class GitHubError(RuntimeError):
@@ -39,6 +43,65 @@ class GitHubIssues:
     async def __aexit__(self, *_: object) -> None:
         if self._owns_client:
             await self._client.aclose()
+
+    async def ensure_repository_contract(self) -> None:
+        try:
+            repository_response = await self._request("GET", f"/repos/{self._repository}")
+            repository = _json_object(repository_response)
+        except GitHubError as exc:
+            raise GitHubError(
+                "GitHub repository access check failed; verify the configured owner/repo "
+                "and token access"
+            ) from exc
+
+        if repository.get("has_issues") is not True:
+            raise GitHubError("GitHub Issues are disabled or unavailable for the repository")
+
+        created_label = False
+        existing_labels: list[tuple[str, str]] = []
+        labels_path = f"/repos/{self._repository}/labels"
+        for label in REQUIRED_LABELS:
+            label_path = f"{labels_path}/{label}"
+            try:
+                response = await self._request("GET", label_path, allow_not_found=True)
+            except GitHubError as exc:
+                raise GitHubError(
+                    "GitHub required-label check failed; verify repository Issues read access"
+                ) from exc
+
+            if response.status_code == 404:
+                try:
+                    created_response = await self._request(
+                        "POST",
+                        labels_path,
+                        json={
+                            "name": label,
+                            "color": BOOTSTRAP_LABEL_COLOR,
+                            "description": BOOTSTRAP_LABEL_DESCRIPTION,
+                        },
+                    )
+                    _label_from_json(created_response, label)
+                except GitHubError as exc:
+                    raise GitHubError(
+                        "GitHub required-label bootstrap failed; verify Issues: Read and write "
+                        "permission"
+                    ) from exc
+                created_label = True
+            else:
+                existing_labels.append(_label_from_json(response, label))
+
+        if not created_label:
+            label, color = existing_labels[0]
+            try:
+                updated_response = await self._request(
+                    "PATCH", f"{labels_path}/{label}", json={"color": color}
+                )
+            except GitHubError as exc:
+                raise GitHubError(
+                    "GitHub repository contract write check failed; verify Issues: Read and "
+                    "write permission"
+                ) from exc
+            _label_from_json(updated_response, label)
 
     async def find_by_source_key(self, source_key: str) -> Issue | None:
         response = await self._request(
@@ -106,9 +169,18 @@ class GitHubIssues:
             raise GitHubError("GitHub did not apply the Later state")
         return issue
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        allow_not_found: bool = False,
+        **kwargs: Any,
+    ) -> httpx.Response:
         try:
             response = await self._client.request(method, path, **kwargs)
+            if allow_not_found and response.status_code == 404:
+                return response
             response.raise_for_status()
             return response
         except httpx.HTTPError as exc:
@@ -144,6 +216,15 @@ def _label_names(labels: Iterable[Any]) -> list[str]:
         elif isinstance(label, dict) and isinstance(label.get("name"), str):
             result.append(label["name"])
     return result
+
+
+def _label_from_json(response: httpx.Response, expected_name: str) -> tuple[str, str]:
+    data = _json_object(response)
+    name = data.get("name")
+    color = data.get("color")
+    if name != expected_name or not isinstance(color, str):
+        raise GitHubError("GitHub returned an unexpected required label")
+    return name, color
 
 
 def _issue_from_json(data: dict[str, Any]) -> Issue:

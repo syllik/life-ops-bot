@@ -25,7 +25,7 @@ class FakeLifeOps:
         self.captures.append(capture)
         if self.capture_error:
             raise GitHubError("internal")
-        return Issue(42, "https://github.com/syllik/life-ops/issues/42", "Title")
+        return Issue(42, "https://github.com/owner/tasks/issues/42", "Title")
 
     async def done(self, issue_number: int) -> Issue:
         self.done_calls.append(issue_number)

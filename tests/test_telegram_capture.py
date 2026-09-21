@@ -20,7 +20,7 @@ class FakeLifeOps:
         self.captures.append(capture)
         if self.capture_error:
             raise GitHubError("internal")
-        return Issue(42, "https://github.com/syllik/life-ops/issues/42", "Title")
+        return Issue(42, "https://github.com/owner/tasks/issues/42", "Title")
 
     async def done(self, issue_number: int) -> Issue:
         self.done_calls.append(issue_number)
@@ -71,13 +71,13 @@ async def test_authorized_text_link_is_saved_and_replied_with_actions() -> None:
     assert life_ops.captures == [Capture("https://example.com/a?x=1&y=2", -99, 7, None)]
     message.answer.assert_awaited_once()
     args, kwargs = message.answer.await_args
-    assert args[0] == "✅ Saved #42\nhttps://github.com/syllik/life-ops/issues/42"
+    assert args[0] == "✅ Saved #42\nhttps://github.com/owner/tasks/issues/42"
     assert kwargs["disable_web_page_preview"] is True
     buttons = kwargs["reply_markup"].inline_keyboard[0]
     assert [(b.text, b.callback_data, b.url) for b in buttons] == [
         ("Done", "done:42", None),
         ("Later", "later:42", None),
-        ("GitHub", None, "https://github.com/syllik/life-ops/issues/42"),
+        ("GitHub", None, "https://github.com/owner/tasks/issues/42"),
     ]
 
 
