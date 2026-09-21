@@ -4,60 +4,70 @@ Small Telegram interface for a GitHub-hosted personal task and reminder system.
 
 The durable data lives in the private `syllik/life-ops` repository. This public repository contains only the bot code and documentation.
 
-## MVP
+## Current vertical slice
 
 ```text
-Telegram
-   |
-   v
-life-ops-bot
-   |
-   +--> classify captured text
-   |
-   +--> GitHub Issues in syllik/life-ops
+Telegram text / link / forward
+    -> exact numeric user authorization
+    -> preserve original input
+    -> create state:inbox GitHub Issue
+    -> reply with Saved + Done / Later / GitHub actions
 ```
 
-GitHub Issues are the source of truth. The bot does not own a separate application database.
+The bot uses Telegram long polling. It has no public HTTP endpoint and no application database.
 
-Initial scope:
+`Done` closes the Issue. `Later` preserves non-state labels and replaces any conflicting `state:*` label with `state:later`. Until the replaceable classifier is added, every new capture is saved as `state:inbox` with a deterministic title.
 
-- accept text, links, and forwarded Telegram messages
-- allow only one configured Telegram user ID
-- create and update GitHub Issues
-- preserve the original captured text
-- classify into `area:*`, `type:*`, and sparse `state:*` labels
-- close an Issue for Done
-- support Later / Now
-- expose compact navigation and search
-- later add GitHub-backed reminders
+## Idempotency
 
-Out of scope for the MVP:
+Capture writes use `(telegram chat_id, message_id)` as a stable source key stored in the Issue body. Before creating an Issue, the bot scans the 100 most recently created Issues for that key. This survives normal process restarts and Telegram redelivery without introducing a database.
 
-- GitHub Project
-- SQLite or another application database
-- web UI
-- webhook/public HTTP server
-- location/geofencing
-- multi-user support
+This is deliberately best-effort rather than transactional exactly-once delivery: a concurrent race between the lookup and create can still duplicate an Issue, and a retry older than the 100-Issue scan window can do the same. The bot is single-user/single-process, so that trade-off is acceptable for the first slice. `Done` and `Later` are idempotent state-setting operations.
 
-## Security
+## Configuration
 
-The bot must reject unauthorized Telegram users before any processing or persistence.
+Python 3.12+ is required.
 
-Secrets stay outside Git:
+Copy `.env.example` into your deployment secret/configuration mechanism and provide:
 
 - `TELEGRAM_BOT_TOKEN`
-- `TELEGRAM_ALLOWED_USER_ID`
-- `GITHUB_TOKEN`
-- LLM provider credentials when used
+- `TELEGRAM_ALLOWED_USER_ID` — exact positive numeric Telegram user ID
+- `GITHUB_TOKEN` — minimum permissions required to read/write Issues in `syllik/life-ops`
+- `LIFE_OPS_REPOSITORY` — defaults to `syllik/life-ops`
 
-The GitHub credential should have the minimum access required to operate on `syllik/life-ops`.
+The application intentionally does not load `.env` files itself. Keep real secrets outside Git and inject them into the environment.
+
+Install and run:
+
+```bash
+python -m venv .venv
+. .venv/bin/activate
+pip install -e '.[dev]'
+life-ops-bot
+```
+
+Validation:
+
+```bash
+pytest
+ruff check .
+```
+
+## Architecture boundaries
+
+GitHub Issues are the source of truth. The bot does not own SQLite, a GitHub Project, a queue, or another durable state store. Core behavior is independent of Telegram and GitHub implementations; the current adapters are aiogram 3.x and a small httpx GitHub REST client.
+
+Unauthorized Telegram users are rejected before message text is read, GitHub is called, or any Telegram response is sent. GitHub errors returned to Telegram are sanitized and never include private response bodies.
+
+## Deferred intentionally
+
+Not part of this slice: LLM classification, navigation/search, reminders, deployment/containerization, multi-user support, or a webhook/public server.
 
 ## Analogue decision
 
 Existing projects were reviewed before starting this tool, including `nxt-am/tg-bot-reminders` and `mtzanidakis/dodo`.
 
-They provide useful reference patterns for Telegram UX, timezone handling, allowlisting, polling/backoff, and operations. They are not used as a fork base because the current Life Ops architecture is GitHub-Issues-first and intentionally avoids their database/scheduler-centric application state. Reusing a fork would require deleting most of the upstream architecture.
+They provide useful reference patterns for Telegram UX, timezone handling, allowlisting, polling/backoff, and operations. They are not used as a fork base because the current Life Ops architecture is GitHub-Issues-first and intentionally avoids their database/scheduler-centric application state.
 
 ## License
 
