@@ -92,3 +92,18 @@ def test_make_issue_body_omits_forward_line_for_normal_message() -> None:
     without_forward = make_issue_body(replace(capture, forwarded_from=None))
     assert "forwarded_from:" in with_forward
     assert "forwarded_from:" not in without_forward
+
+
+def test_make_issue_body_preserves_text_link_targets_separately() -> None:
+    original = "Open docs"
+    body = make_issue_body(
+        Capture(
+            original,
+            1,
+            2,
+            link_targets=("https://example.com/docs?a=1&b=2",),
+        )
+    )
+
+    assert "## Original Telegram input\n\nOpen docs\n\n## Telegram source" in body
+    assert "- text_link_target: https://example.com/docs?a=1&b=2" in body
