@@ -35,10 +35,17 @@ class FakeLifeOps:
         return Issue(issue_number, "https://example", "x", ("state:later",))
 
 
-def fake_message(*, user_id: int = 123, text: str | None = "hello", forward_origin=None):
+def fake_message(
+    *,
+    user_id: int = 123,
+    text: str | None = "hello",
+    forward_origin=None,
+    entities=None,
+):
     return SimpleNamespace(
         from_user=SimpleNamespace(id=user_id),
         text=text,
+        entities=entities,
         chat=SimpleNamespace(id=-99),
         message_id=7,
         forward_origin=forward_origin,
@@ -75,6 +82,32 @@ async def test_authorized_text_link_is_saved_and_replied_with_actions() -> None:
 
 
 @pytest.mark.asyncio
+async def test_formatted_text_link_preserves_visible_text_and_target() -> None:
+    life_ops = FakeLifeOps()
+    message = fake_message(
+        text="Open docs",
+        entities=[
+            SimpleNamespace(
+                type="text_link",
+                url="https://example.com/docs?a=1&b=2",
+            )
+        ],
+    )
+
+    await handle_message(message, life_ops, 123)
+
+    assert life_ops.captures == [
+        Capture(
+            "Open docs",
+            -99,
+            7,
+            None,
+            ("https://example.com/docs?a=1&b=2",),
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_unauthorized_message_has_no_processing_or_side_effects() -> None:
     life_ops = FakeLifeOps()
 
@@ -84,6 +117,10 @@ async def test_unauthorized_message_has_no_processing_or_side_effects() -> None:
         @property
         def text(self):
             raise AssertionError("unauthorized body must not be accessed")
+
+        @property
+        def entities(self):
+            raise AssertionError("unauthorized entities must not be accessed")
 
         answer = AsyncMock()
 
@@ -119,4 +156,3 @@ async def test_github_failure_reports_error_without_false_success() -> None:
     message.answer.assert_awaited_once_with(SAVE_ERROR)
     assert "private input" not in message.answer.await_args.args[0]
     assert "Saved" not in message.answer.await_args.args[0]
-
