@@ -39,6 +39,7 @@ async def test_find_by_source_key_scans_recent_issues_and_skips_prs() -> None:
             200,
             json=[
                 {**issue_json(99, body="source_key: telegram:1:2"), "pull_request": {}},
+                issue_json(13, body="<!-- life-ops\nsource_key: telegram:1:23\n-->"),
                 issue_json(12, body="<!-- life-ops\nsource_key: telegram:1:2\n-->"),
             ],
         )
@@ -72,4 +73,3 @@ async def test_create_issue_maps_title_body_and_inbox_label() -> None:
         issue = await github.create_issue(title="Hello", body="raw body", labels=("state:inbox",))
     assert issue.number == 50
     assert issue.labels == ("state:inbox",)
-
