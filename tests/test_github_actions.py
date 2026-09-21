@@ -48,7 +48,7 @@ async def test_close_issue_is_repeatable_state_setting_operation() -> None:
 
 
 @pytest.mark.asyncio
-async def test_set_later_replaces_only_conflicting_state_labels() -> None:
+async def test_set_later_replaces_conflicting_state_labels_and_keeps_issue_open() -> None:
     calls: list[tuple[str, dict[str, object] | None]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -71,6 +71,7 @@ async def test_set_later_replaces_only_conflicting_state_labels() -> None:
                     {"name": "type:task"},
                     {"name": "state:later"},
                 ],
+                state="open",
             ),
         )
 
@@ -80,21 +81,58 @@ async def test_set_later_replaces_only_conflicting_state_labels() -> None:
 
     assert calls == [
         ("GET", None),
-        ("PATCH", {"labels": ["area:software", "type:task", "state:later"]}),
+        (
+            "PATCH",
+            {
+                "labels": ["area:software", "type:task", "state:later"],
+                "state": "open",
+            },
+        ),
     ]
     assert issue.labels == ("area:software", "type:task", "state:later")
+    assert issue.state == "open"
 
 
 @pytest.mark.asyncio
-async def test_set_later_is_noop_when_already_later() -> None:
+async def test_set_later_is_noop_when_already_later_and_open() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.method == "GET"
-        return httpx.Response(200, json=issue_json(8, labels=[{"name": "state:later"}]))
+        return httpx.Response(
+            200,
+            json=issue_json(8, labels=[{"name": "state:later"}], state="open"),
+        )
 
     async with make_client(handler) as client:
         github = GitHubIssues(token="secret", repository="syllik/life-ops", client=client)
         issue = await github.set_later(8)
     assert issue.labels == ("state:later",)
+    assert issue.state == "open"
+
+
+@pytest.mark.asyncio
+async def test_set_later_reopens_closed_issue() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(
+                200,
+                json=issue_json(8, labels=[{"name": "state:later"}], state="closed"),
+            )
+        assert json.loads(request.content) == {"labels": ["state:later"], "state": "open"}
+        return httpx.Response(
+            200,
+            json=issue_json(8, labels=[{"name": "state:later"}], state="open"),
+        )
+
+    async with make_client(handler) as client:
+        github = GitHubIssues(token="secret", repository="syllik/life-ops", client=client)
+        issue = await github.set_later(8)
+
+    assert issue.state == "open"
+    assert calls == 2
 
 
 @pytest.mark.asyncio
@@ -121,7 +159,28 @@ async def test_later_rejects_conflicting_state_response() -> None:
             json=issue_json(
                 8,
                 labels=[{"name": "state:later"}, {"name": "state:waiting"}],
+                state="open",
             ),
+        )
+
+    async with make_client(handler) as client:
+        github = GitHubIssues(token="secret", repository="syllik/life-ops", client=client)
+        with pytest.raises(GitHubError, match="Later state"):
+            await github.set_later(8)
+
+
+@pytest.mark.asyncio
+async def test_later_rejects_closed_response() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return httpx.Response(200, json=issue_json(8, labels=[{"name": "state:now"}]))
+        return httpx.Response(
+            200,
+            json=issue_json(8, labels=[{"name": "state:later"}], state="closed"),
         )
 
     async with make_client(handler) as client:
