@@ -15,6 +15,7 @@ class Capture:
     chat_id: int
     message_id: int
     forwarded_from: str | None = None
+    link_targets: tuple[str, ...] = ()
 
     @property
     def source_key(self) -> str:
@@ -80,6 +81,8 @@ def make_issue_body(capture: Capture) -> str:
     ]
     if capture.forwarded_from is not None:
         source_lines.append(f"- forwarded_from: {capture.forwarded_from}")
+    for target in capture.link_targets:
+        source_lines.append(f"- text_link_target: {target}")
 
     return "\n".join(
         [
