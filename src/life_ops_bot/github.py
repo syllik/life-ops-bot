@@ -56,7 +56,7 @@ class GitHubIssues:
             if "pull_request" in item:
                 continue
             body = item.get("body") or ""
-            if marker in body:
+            if marker in body.splitlines():
                 return _issue_from_json(item)
         return None
 
@@ -92,17 +92,17 @@ class GitHubIssues:
             *(label for label in labels if not label.startswith(STATE_PREFIX)),
             LATER_LABEL,
         )
-        if tuple(labels) == next_labels:
+        if tuple(labels) == next_labels and current.get("state") == "open":
             return _issue_from_json(current)
 
         response = await self._request(
             "PATCH",
             f"/repos/{self._repository}/issues/{issue_number}",
-            json={"labels": list(next_labels)},
+            json={"labels": list(next_labels), "state": "open"},
         )
         issue = _issue_from_json(_json_object(response))
         state_labels = tuple(label for label in issue.labels if label.startswith(STATE_PREFIX))
-        if state_labels != (LATER_LABEL,):
+        if state_labels != (LATER_LABEL,) or issue.state != "open":
             raise GitHubError("GitHub did not apply the Later state")
         return issue
 
