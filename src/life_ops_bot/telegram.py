@@ -49,6 +49,7 @@ async def handle_message(message: Message, life_ops: LifeOps, allowed_user_id: i
         chat_id=message.chat.id,
         message_id=message.message_id,
         forwarded_from=describe_forward_origin(message),
+        link_targets=text_link_targets(message),
     )
     try:
         issue = await life_ops.capture(capture)
@@ -111,6 +112,15 @@ def parse_callback(data: str | None) -> tuple[str, int] | None:
     if issue_number <= 0:
         return None
     return action, issue_number
+
+
+def text_link_targets(message: Message) -> tuple[str, ...]:
+    entities = message.entities or ()
+    return tuple(
+        entity.url
+        for entity in entities
+        if entity.type == "text_link" and entity.url is not None
+    )
 
 
 def describe_forward_origin(message: Message) -> str | None:
