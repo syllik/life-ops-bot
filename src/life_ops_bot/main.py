@@ -14,17 +14,19 @@ from .telegram import build_router
 async def run() -> None:
     settings = Settings.from_env(os.environ)
     bot = Bot(token=settings.telegram_bot_token)
-    dispatcher = Dispatcher()
-
-    async with GitHubIssues(
-        token=settings.github_token,
-        repository=settings.life_ops_repository,
-    ) as github:
-        dispatcher.include_router(build_router(LifeOps(github), settings.telegram_allowed_user_id))
-        try:
+    try:
+        dispatcher = Dispatcher()
+        async with GitHubIssues(
+            token=settings.github_token,
+            repository=settings.github_repository,
+        ) as github:
+            await github.ensure_repository_contract()
+            dispatcher.include_router(
+                build_router(LifeOps(github), settings.telegram_allowed_user_id)
+            )
             await dispatcher.start_polling(bot)
-        finally:
-            await bot.session.close()
+    finally:
+        await bot.session.close()
 
 
 def main() -> None:

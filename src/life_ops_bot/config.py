@@ -13,15 +13,19 @@ class Settings:
     telegram_bot_token: str
     telegram_allowed_user_id: int
     github_token: str
-    life_ops_repository: str
+    github_repository: str
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Settings:
         telegram_token = _required(env, "TELEGRAM_BOT_TOKEN")
         github_token = _required(env, "GITHUB_TOKEN")
-        repository = env.get("LIFE_OPS_REPOSITORY", "syllik/life-ops").strip()
-        if repository.count("/") != 1 or any(not part for part in repository.split("/")):
-            raise ConfigError("LIFE_OPS_REPOSITORY must be in owner/repository form")
+        repository = _required(env, "GITHUB_REPOSITORY")
+        if (
+            repository.count("/") != 1
+            or any(not part for part in repository.split("/"))
+            or any(character.isspace() for character in repository)
+        ):
+            raise ConfigError("GITHUB_REPOSITORY must be in owner/repository form")
 
         raw_user_id = _required(env, "TELEGRAM_ALLOWED_USER_ID")
         try:
@@ -35,7 +39,7 @@ class Settings:
             telegram_bot_token=telegram_token,
             telegram_allowed_user_id=allowed_user_id,
             github_token=github_token,
-            life_ops_repository=repository,
+            github_repository=repository,
         )
 
 

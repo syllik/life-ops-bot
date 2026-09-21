@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "life-ops-bot"
 version = "0.1.0"
-description = "Single-user Telegram interface for GitHub-hosted Life Ops"
+description = "Single-user Telegram interface for self-hosted GitHub Issues"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"

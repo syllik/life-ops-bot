@@ -15,7 +15,7 @@ def issue_json(
 ) -> dict[str, object]:
     return {
         "number": number,
-        "html_url": f"https://github.com/syllik/life-ops/issues/{number}",
+        "html_url": f"https://github.com/owner/tasks/issues/{number}",
         "title": "Issue",
         "labels": labels or [],
         "state": state,
@@ -40,7 +40,7 @@ async def test_close_issue_is_repeatable_state_setting_operation() -> None:
         return httpx.Response(200, json=issue_json(7, state="closed"))
 
     async with make_client(handler) as client:
-        github = GitHubIssues(token="secret", repository="syllik/life-ops", client=client)
+        github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
         first = await github.close_issue(7)
         second = await github.close_issue(7)
     assert first.state == second.state == "closed"
@@ -59,7 +59,7 @@ async def test_set_later_replaces_conflicting_state_labels_and_keeps_issue_open(
                 200,
                 json=issue_json(
                     8,
-                    labels=[{"name": "area:software"}, "type:task", {"name": "state:now"}, 123],
+                    labels=[{"name": "custom-a"}, "custom-b", {"name": "state:now"}, 123],
                 ),
             )
         return httpx.Response(
@@ -67,8 +67,8 @@ async def test_set_later_replaces_conflicting_state_labels_and_keeps_issue_open(
             json=issue_json(
                 8,
                 labels=[
-                    {"name": "area:software"},
-                    {"name": "type:task"},
+                    {"name": "custom-a"},
+                    {"name": "custom-b"},
                     {"name": "state:later"},
                 ],
                 state="open",
@@ -76,7 +76,7 @@ async def test_set_later_replaces_conflicting_state_labels_and_keeps_issue_open(
         )
 
     async with make_client(handler) as client:
-        github = GitHubIssues(token="secret", repository="syllik/life-ops", client=client)
+        github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
         issue = await github.set_later(8)
 
     assert calls == [
@@ -84,12 +84,12 @@ async def test_set_later_replaces_conflicting_state_labels_and_keeps_issue_open(
         (
             "PATCH",
             {
-                "labels": ["area:software", "type:task", "state:later"],
+                "labels": ["custom-a", "custom-b", "state:later"],
                 "state": "open",
             },
         ),
     ]
-    assert issue.labels == ("area:software", "type:task", "state:later")
+    assert issue.labels == ("custom-a", "custom-b", "state:later")
     assert issue.state == "open"
 
 
@@ -103,7 +103,7 @@ async def test_set_later_is_noop_when_already_later_and_open() -> None:
         )
 
     async with make_client(handler) as client:
-        github = GitHubIssues(token="secret", repository="syllik/life-ops", client=client)
+        github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
         issue = await github.set_later(8)
     assert issue.labels == ("state:later",)
     assert issue.state == "open"
@@ -128,7 +128,7 @@ async def test_set_later_reopens_closed_issue() -> None:
         )
 
     async with make_client(handler) as client:
-        github = GitHubIssues(token="secret", repository="syllik/life-ops", client=client)
+        github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
         issue = await github.set_later(8)
 
     assert issue.state == "open"
@@ -140,7 +140,7 @@ async def test_close_rejects_false_success_response() -> None:
     async with make_client(
         lambda _: httpx.Response(200, json=issue_json(7, state="open"))
     ) as client:
-        github = GitHubIssues(token="secret", repository="syllik/life-ops", client=client)
+        github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
         with pytest.raises(GitHubError, match="did not close"):
             await github.close_issue(7)
 
@@ -164,7 +164,7 @@ async def test_later_rejects_conflicting_state_response() -> None:
         )
 
     async with make_client(handler) as client:
-        github = GitHubIssues(token="secret", repository="syllik/life-ops", client=client)
+        github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
         with pytest.raises(GitHubError, match="Later state"):
             await github.set_later(8)
 
@@ -184,6 +184,6 @@ async def test_later_rejects_closed_response() -> None:
         )
 
     async with make_client(handler) as client:
-        github = GitHubIssues(token="secret", repository="syllik/life-ops", client=client)
+        github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
         with pytest.raises(GitHubError, match="Later state"):
             await github.set_later(8)
