@@ -5,14 +5,14 @@ import os
 
 from aiogram import Bot, Dispatcher
 
-from .config import Settings
+from .config import Settings, load_runtime_env
 from .core import LifeOps
 from .github import GitHubIssues
 from .telegram import build_router
 
 
 async def run() -> None:
-    settings = Settings.from_env(os.environ)
+    settings = Settings.from_env(load_runtime_env(os.environ))
     bot = Bot(token=settings.telegram_bot_token)
     try:
         dispatcher = Dispatcher()
