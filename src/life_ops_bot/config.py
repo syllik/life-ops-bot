@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from pathlib import Path
+
+from dotenv import dotenv_values
 
 
 class ConfigError(ValueError):
@@ -41,6 +44,30 @@ class Settings:
             github_token=github_token,
             github_repository=repository,
         )
+
+
+def load_runtime_env(
+    env: Mapping[str, str],
+    env_file: str | Path = ".env",
+) -> dict[str, str]:
+    """Merge an optional local env file with the process environment.
+
+    Process environment variables take precedence so deployment platforms can
+    inject runtime configuration without depending on a local file.
+    """
+
+    path = Path(env_file)
+    file_values: dict[str, str] = {}
+    if path.is_file():
+        file_values = {
+            key: value
+            for key, value in dotenv_values(path, interpolate=False).items()
+            if value is not None
+        }
+
+    merged = file_values
+    merged.update(env)
+    return merged
 
 
 def _required(env: Mapping[str, str], name: str) -> str:

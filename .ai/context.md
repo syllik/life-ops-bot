@@ -49,14 +49,16 @@ Unauthorized senders must be rejected before reading the private message body or
 
 ## Configuration and credentials
 
-Required environment values:
+Required runtime values:
 
 - `TELEGRAM_BOT_TOKEN` — secret.
 - `TELEGRAM_ALLOWED_USER_ID` — exact positive numeric user ID.
 - `GITHUB_TOKEN` — secret.
 - `GITHUB_REPOSITORY` — required `owner/repository` configuration.
 
-The recommended current credential is a fine-grained personal access token scoped to the selected repository with Issues read and write access. GitHub App authentication can be considered later for more scalable or long-lived installations; it is not implemented now. Do not commit real values.
+For local/self-hosted first run, the application reads an optional untracked `.env` file. Process environment variables override `.env`, so deployment platforms can inject the same values without changing application behavior. Secret interpolation from the local file is disabled.
+
+The recommended current GitHub credential is a fine-grained personal access token scoped to the selected repository with Issues read and write access. GitHub App authentication can be considered later for more scalable or long-lived installations; it is not implemented now. Do not commit real values.
 
 ## Testing
 
