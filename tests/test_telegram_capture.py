@@ -14,12 +14,13 @@ class FakeLifeOps:
         self.done_calls: list[int] = []
         self.later_calls: list[int] = []
         self.capture_error = False
+        self.capture_retryable = False
         self.action_error = False
 
     async def capture(self, capture: Capture) -> Issue:
         self.captures.append(capture)
         if self.capture_error:
-            raise GitHubError("internal")
+            raise GitHubError("internal", retryable=self.capture_retryable)
         return Issue(42, "https://github.com/owner/tasks/issues/42", "Title")
 
     async def done(self, issue_number: int) -> Issue:
@@ -162,6 +163,7 @@ async def test_github_failure_reports_error_without_false_success() -> None:
 async def test_github_failure_propagates_without_retry_spam_in_webhook_mode() -> None:
     life_ops = FakeLifeOps()
     life_ops.capture_error = True
+    life_ops.capture_retryable = True
     message = fake_message(text="private input")
 
     with pytest.raises(GitHubError, match="internal"):
@@ -173,3 +175,19 @@ async def test_github_failure_propagates_without_retry_spam_in_webhook_mode() ->
         )
 
     message.answer.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_permanent_github_failure_is_acknowledged_once_in_webhook_mode() -> None:
+    life_ops = FakeLifeOps()
+    life_ops.capture_error = True
+    message = fake_message(text="private input")
+
+    await handle_message(
+        message,
+        life_ops,
+        123,
+        propagate_github_errors=True,
+    )
+
+    message.answer.assert_awaited_once_with(SAVE_ERROR)
