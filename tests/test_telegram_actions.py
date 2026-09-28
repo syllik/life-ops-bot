@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
 import pytest
+from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError
 
 from life_ops_bot.core import Capture, Issue
 from life_ops_bot.github import GitHubError
@@ -155,3 +156,44 @@ async def test_permanent_github_callback_failure_is_acknowledged_once() -> None:
     )
 
     callback.answer.assert_awaited_once_with(ACTION_ERROR, show_alert=True)
+
+
+@pytest.mark.asyncio
+async def test_permanent_callback_answer_failure_is_acknowledged_after_action() -> None:
+    life_ops = FakeLifeOps()
+    callback = fake_callback(data="done:44")
+    callback.answer.side_effect = TelegramBadRequest(
+        method=SimpleNamespace(),
+        message="query is too old and response timeout expired",
+    )
+
+    await handle_callback(
+        callback,
+        life_ops,
+        123,
+        propagate_github_errors=True,
+    )
+
+    assert life_ops.done_calls == [44]
+    callback.answer.assert_awaited_once_with("Done")
+
+
+@pytest.mark.asyncio
+async def test_transient_callback_answer_failure_still_propagates_for_retry() -> None:
+    life_ops = FakeLifeOps()
+    callback = fake_callback(data="done:45")
+    callback.answer.side_effect = TelegramNetworkError(
+        method=SimpleNamespace(),
+        message="temporary network failure",
+    )
+
+    with pytest.raises(TelegramNetworkError):
+        await handle_callback(
+            callback,
+            life_ops,
+            123,
+            propagate_github_errors=True,
+        )
+
+    assert life_ops.done_calls == [45]
+    callback.answer.assert_awaited_once_with("Done")
