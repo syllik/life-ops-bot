@@ -159,7 +159,7 @@ async def test_github_failure_reports_error_without_false_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_github_failure_can_propagate_after_error_reply_for_webhook_retry() -> None:
+async def test_github_failure_propagates_without_retry_spam_in_webhook_mode() -> None:
     life_ops = FakeLifeOps()
     life_ops.capture_error = True
     message = fake_message(text="private input")
@@ -172,4 +172,4 @@ async def test_github_failure_can_propagate_after_error_reply_for_webhook_retry(
             propagate_github_errors=True,
         )
 
-    message.answer.assert_awaited_once_with(SAVE_ERROR)
+    message.answer.assert_not_awaited()
