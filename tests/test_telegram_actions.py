@@ -120,3 +120,20 @@ def test_saved_keyboard() -> None:
     assert keyboard.inline_keyboard[0][2].url == "https://example/5"
 
 
+
+
+@pytest.mark.asyncio
+async def test_github_callback_failure_can_propagate_after_error_reply_for_webhook_retry() -> None:
+    life_ops = FakeLifeOps()
+    life_ops.action_error = True
+    callback = fake_callback(data="done:44")
+
+    with pytest.raises(GitHubError, match="internal"):
+        await handle_callback(
+            callback,
+            life_ops,
+            123,
+            propagate_github_errors=True,
+        )
+
+    callback.answer.assert_awaited_once_with(ACTION_ERROR, show_alert=True)
