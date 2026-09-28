@@ -133,3 +133,38 @@ async def test_transport_failures_are_retryable_and_sanitized() -> None:
 
     assert exc_info.value.retryable is True
     assert "private transport detail" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_secondary_rate_limit_403_without_headers_is_retryable() -> None:
+    async with make_client(
+        lambda _: httpx.Response(
+            403,
+            json={"message": "You have exceeded a secondary rate limit."},
+        )
+    ) as client:
+        github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
+        with pytest.raises(GitHubError) as exc_info:
+            await github.find_by_source_key("telegram:1:2")
+
+    assert exc_info.value.retryable is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(404, json={"message": "Not Found"}),
+        httpx.Response(200, json={"has_issues": False}),
+        httpx.Response(200, json=[]),
+    ],
+)
+async def test_repository_contract_failures_are_always_retryable(
+    response: httpx.Response,
+) -> None:
+    async with make_client(lambda _: response) as client:
+        github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
+        with pytest.raises(GitHubError) as exc_info:
+            await github.ensure_repository_contract()
+
+    assert exc_info.value.retryable is True
