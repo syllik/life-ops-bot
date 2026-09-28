@@ -20,11 +20,19 @@ class WebhookSetupError(RuntimeError):
 
 
 def webhook_url(base_url: str) -> str:
-    normalized = base_url.strip().rstrip("/")
-    parsed = urlparse(normalized)
-    if parsed.scheme != "https" or not parsed.netloc or parsed.query or parsed.fragment:
-        raise WebhookSetupError("production base URL must be an HTTPS origin or base path")
-    return f"{normalized}{WEBHOOK_PATH}"
+    parsed = urlparse(base_url.strip())
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path not in {"", "/"}
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+    ):
+        raise WebhookSetupError("production base URL must be an HTTPS origin")
+    return f"https://{parsed.netloc}{WEBHOOK_PATH}"
 
 
 async def configure_webhook(
