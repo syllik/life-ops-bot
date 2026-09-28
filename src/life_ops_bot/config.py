@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
 from dotenv import dotenv_values
+
+WEBHOOK_PATH = "/api/telegram/webhook"
+WEBHOOK_SECRET_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,256}$")
 
 
 class ConfigError(ValueError):
@@ -17,6 +21,7 @@ class Settings:
     telegram_allowed_user_id: int
     github_token: str
     github_repository: str
+    telegram_webhook_secret: str | None = None
 
     @classmethod
     def from_env(cls, env: Mapping[str, str]) -> Settings:
@@ -38,12 +43,25 @@ class Settings:
         if allowed_user_id <= 0:
             raise ConfigError("TELEGRAM_ALLOWED_USER_ID must be positive")
 
+        webhook_secret = env.get("TELEGRAM_WEBHOOK_SECRET", "").strip() or None
+        if webhook_secret is not None and WEBHOOK_SECRET_PATTERN.fullmatch(webhook_secret) is None:
+            raise ConfigError(
+                "TELEGRAM_WEBHOOK_SECRET must be 1-256 characters using only letters, "
+                "digits, '_' or '-'"
+            )
+
         return cls(
             telegram_bot_token=telegram_token,
             telegram_allowed_user_id=allowed_user_id,
             github_token=github_token,
             github_repository=repository,
+            telegram_webhook_secret=webhook_secret,
         )
+
+    def require_webhook_secret(self) -> str:
+        if self.telegram_webhook_secret is None:
+            raise ConfigError("TELEGRAM_WEBHOOK_SECRET is required for webhook transport")
+        return self.telegram_webhook_secret
 
 
 def load_runtime_env(
