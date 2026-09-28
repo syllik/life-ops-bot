@@ -13,6 +13,7 @@ dependencies = [
   "aiogram>=3.31,<4",
   "httpx>=0.27,<1",
   "python-dotenv>=1.0,<2",
+  "starlette>=0.40,<1",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +26,7 @@ dev = [
 
 [project.scripts]
 life-ops-bot = "life_ops_bot.main:main"
+life-ops-webhook = "life_ops_bot.webhook_setup:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/life_ops_bot"]
