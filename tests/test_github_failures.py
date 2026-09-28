@@ -33,6 +33,7 @@ async def test_http_and_shape_failures_are_sanitized() -> None:
         with pytest.raises(GitHubError, match="GitHub request failed") as exc_info:
             await github.find_by_source_key("telegram:1:2")
         assert "private failure body" not in str(exc_info.value)
+        assert exc_info.value.retryable is True
 
     async with make_client(lambda _: httpx.Response(200, json={"not": "a list"})) as client:
         github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
@@ -88,3 +89,47 @@ async def test_create_rejects_silently_dropped_labels() -> None:
             await github.create_issue(title="Hello", body="body", labels=("state:inbox",))
 
 
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("status", "headers", "retryable"),
+    [
+        (404, {}, False),
+        (403, {}, False),
+        (403, {"retry-after": "30"}, True),
+        (403, {"x-ratelimit-remaining": "0"}, True),
+        (408, {}, True),
+        (429, {}, True),
+        (500, {}, True),
+        (503, {}, True),
+    ],
+)
+async def test_http_status_failures_are_classified_for_retry(
+    status: int,
+    headers: dict[str, str],
+    retryable: bool,
+) -> None:
+    async with make_client(
+        lambda _: httpx.Response(status, headers=headers, text="private")
+    ) as client:
+        github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
+        with pytest.raises(GitHubError, match="GitHub request failed") as exc_info:
+            await github.find_by_source_key("telegram:1:2")
+
+    assert exc_info.value.retryable is retryable
+    assert "private" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_transport_failures_are_retryable_and_sanitized() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("private transport detail", request=request)
+
+    async with make_client(handler) as client:
+        github = GitHubIssues(token="secret", repository="owner/tasks", client=client)
+        with pytest.raises(GitHubError, match="GitHub request failed") as exc_info:
+            await github.find_by_source_key("telegram:1:2")
+
+    assert exc_info.value.retryable is True
+    assert "private transport detail" not in str(exc_info.value)
