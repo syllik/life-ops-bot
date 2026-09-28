@@ -1,4 +1,5 @@
 from argparse import Namespace
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -156,10 +157,45 @@ def test_parser_supports_set_info_and_delete() -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_commands_print_sanitized_results(monkeypatch, capsys) -> None:
+async def test_run_set_info_and_delete_commands(monkeypatch, capsys) -> None:
     monkeypatch.setattr(setup.Settings, "from_env", lambda _: settings())
-    monkeypatch.setattr(
-        setup,
-        "configure_webhook",
-        pytest.AsyncMock(return_value={"result": True}) if hasattr(pytest, "AsyncMock") else None,
+
+    set_call = AsyncMock(return_value={"result": True})
+    monkeypatch.setattr(setup, "configure_webhook", set_call)
+    assert await setup._run(Namespace(command="set", base_url="https://example.com")) == 0
+    assert '"ok": true' in capsys.readouterr().out
+    set_call.assert_awaited_once()
+
+    info_call = AsyncMock(
+        return_value={
+            "url": "https://example.com/api/telegram/webhook",
+            "pending_update_count": 0,
+            "secret": "must-not-print",
+        }
     )
+    monkeypatch.setattr(setup, "get_webhook_info", info_call)
+    assert await setup._run(Namespace(command="info")) == 0
+    output = capsys.readouterr().out
+    assert "pending_update_count" in output
+    assert "must-not-print" not in output
+
+    delete_call = AsyncMock(return_value={"result": True})
+    monkeypatch.setattr(setup, "delete_webhook", delete_call)
+    assert (
+        await setup._run(
+            Namespace(command="delete", drop_pending_updates=True)
+        )
+        == 0
+    )
+    assert '"ok": true' in capsys.readouterr().out
+    delete_call.assert_awaited_once_with(
+        settings=settings(),
+        drop_pending_updates=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_rejects_unknown_command(monkeypatch) -> None:
+    monkeypatch.setattr(setup.Settings, "from_env", lambda _: settings())
+    with pytest.raises(AssertionError, match="unreachable"):
+        await setup._run(Namespace(command="unknown"))
