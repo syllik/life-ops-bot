@@ -30,10 +30,7 @@ def client(handler) -> httpx.AsyncClient:
     [
         ("https://example.vercel.app", "https://example.vercel.app/api/telegram/webhook"),
         (" https://example.vercel.app/ ", "https://example.vercel.app/api/telegram/webhook"),
-        (
-            "https://example.com/base",
-            "https://example.com/base/api/telegram/webhook",
-        ),
+        ("https://example.com:8443", "https://example.com:8443/api/telegram/webhook"),
     ],
 )
 def test_webhook_url(base_url: str, expected: str) -> None:
@@ -46,11 +43,14 @@ def test_webhook_url(base_url: str, expected: str) -> None:
         "http://example.com",
         "example.com",
         "https://",
+        "https://example.com/base",
+        "https://example.com/base/",
         "https://example.com?a=1",
         "https://example.com#x",
+        "https://user@example.com",
     ],
 )
-def test_webhook_url_requires_https_without_query_or_fragment(base_url: str) -> None:
+def test_webhook_url_requires_clean_https_origin(base_url: str) -> None:
     with pytest.raises(setup.WebhookSetupError, match="HTTPS"):
         setup.webhook_url(base_url)
 
