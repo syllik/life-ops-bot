@@ -171,7 +171,7 @@ X-Telegram-Bot-Api-Secret-Token
 
 A missing or incorrect secret is rejected before the HTTP body is read. After authenticated transport parsing, the exact numeric Telegram sender is checked before aiogram/domain processing or GitHub access.
 
-Telegram retries webhook delivery when the endpoint returns a non-2xx status. Processing failures therefore return a non-2xx response, while unauthorized Telegram senders are safely ignored with success so Telegram does not retry them indefinitely.
+Telegram retries webhook delivery when the endpoint returns a non-2xx status. Retryable GitHub failures (network errors, rate limits, and 5xx responses) return a non-2xx response. Permanent GitHub failures are acknowledged after one sanitized user-facing error so stale or inaccessible Issues do not enter an endless Telegram retry loop. Unauthorized Telegram senders are safely ignored with success.
 
 No secret is written to GitHub Issues.
 
