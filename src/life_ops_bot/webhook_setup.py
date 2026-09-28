@@ -125,7 +125,10 @@ def _parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("info", help="show current webhook status")
 
-    delete_parser = subparsers.add_parser("delete", help="remove the webhook and allow polling again")
+    delete_parser = subparsers.add_parser(
+        "delete",
+        help="remove the webhook and allow polling again",
+    )
     delete_parser.add_argument(
         "--drop-pending-updates",
         action="store_true",
