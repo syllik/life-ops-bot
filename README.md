@@ -128,7 +128,7 @@ pip install -e '.[dev]'
 
 Put the same Telegram configuration in the local untracked `.env`. The setup helper reads the bot token and webhook secret from configuration, so they do not need to appear in the command itself.
 
-Register the production webhook:
+Register the production webhook using only the HTTPS origin (scheme + host, with no path):
 
 ```bash
 life-ops-webhook set https://<production-host>
