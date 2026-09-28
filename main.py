@@ -8,6 +8,6 @@ from starlette.routing import Mount
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from life_ops_bot.webhook import app as webhook_app  # noqa: E402
+from life_ops_bot.webhook import app as webhook_app
 
 app = Starlette(routes=[Mount("/", app=webhook_app)])
