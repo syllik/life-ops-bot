@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -100,7 +101,7 @@ async def handle_callback(
 
     parsed = parse_callback(callback.data)
     if parsed is None:
-        await callback.answer(ACTION_ERROR, show_alert=True)
+        await _answer_callback(callback, ACTION_ERROR, show_alert=True)
         return
 
     action, issue_number = parsed
@@ -112,10 +113,27 @@ async def handle_callback(
     except GitHubError as exc:
         if propagate_github_errors and exc.retryable:
             raise
-        await callback.answer(ACTION_ERROR, show_alert=True)
+        await _answer_callback(callback, ACTION_ERROR, show_alert=True)
         return
 
-    await callback.answer("Done" if action == "done" else "Moved to Later")
+    await _answer_callback(
+        callback,
+        "Done" if action == "done" else "Moved to Later",
+    )
+
+
+async def _answer_callback(
+    callback: CallbackQuery,
+    text: str,
+    *,
+    show_alert: bool = False,
+) -> None:
+    try:
+        await callback.answer(text, show_alert=show_alert)
+    except TelegramBadRequest:
+        # Callback answers are time-limited by Telegram. A 400 cannot be repaired by
+        # redelivering the immutable callback, while network/5xx errors still propagate.
+        return
 
 
 def saved_keyboard(issue: Issue) -> InlineKeyboardMarkup:
