@@ -209,9 +209,13 @@ async def test_invalid_update_is_rejected_and_bot_is_closed(monkeypatch) -> None
 @pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("error", "expected"),
-    [(GitHubError("safe"), 503), (RuntimeError("unexpected"), 500)],
+    [
+        (GitHubError("retryable", retryable=True), 503),
+        (GitHubError("permanent"), 200),
+        (RuntimeError("unexpected"), 500),
+    ],
 )
-async def test_processing_failures_return_retryable_status(monkeypatch, error, expected) -> None:
+async def test_processing_failures_use_retry_classification(monkeypatch, error, expected) -> None:
     bot = SimpleNamespace(session=SimpleNamespace(close=AsyncMock()))
     monkeypatch.setattr(webhook, "_make_bot", lambda _: bot)
     monkeypatch.setattr(webhook, "_parse_update", lambda payload, _: payload)
