@@ -156,3 +156,20 @@ async def test_github_failure_reports_error_without_false_success() -> None:
     message.answer.assert_awaited_once_with(SAVE_ERROR)
     assert "private input" not in message.answer.await_args.args[0]
     assert "Saved" not in message.answer.await_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_github_failure_can_propagate_after_error_reply_for_webhook_retry() -> None:
+    life_ops = FakeLifeOps()
+    life_ops.capture_error = True
+    message = fake_message(text="private input")
+
+    with pytest.raises(GitHubError, match="internal"):
+        await handle_message(
+            message,
+            life_ops,
+            123,
+            propagate_github_errors=True,
+        )
+
+    message.answer.assert_awaited_once_with(SAVE_ERROR)
