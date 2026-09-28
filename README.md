@@ -96,7 +96,7 @@ At runtime the bot validates repository access and Issues support, creates missi
 The repository exposes a Starlette ASGI app from the root `main.py`. Vercel detects the Python app and installs dependencies from `pyproject.toml`.
 
 1. Import this repository into Vercel.
-2. Use `master` as the production branch.
+2. Use the repository's default branch for Production (currently `master`).
 3. Configure these Production environment variables:
    - `TELEGRAM_BOT_TOKEN`
    - `TELEGRAM_ALLOWED_USER_ID`
