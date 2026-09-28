@@ -129,7 +129,10 @@ async def _answer_callback(
     show_alert: bool = False,
 ) -> None:
     try:
-        await callback.answer(text, show_alert=show_alert)
+        if show_alert:
+            await callback.answer(text, show_alert=True)
+        else:
+            await callback.answer(text)
     except TelegramBadRequest:
         # Callback answers are time-limited by Telegram. A 400 cannot be repaired by
         # redelivering the immutable callback, while network/5xx errors still propagate.
