@@ -83,8 +83,8 @@ async def app(scope: Scope, receive: Receive, send: Send) -> None:
 
         try:
             await process_update(settings, bot, update)
-        except GitHubError:
-            await _respond(send, 503)
+        except GitHubError as exc:
+            await _respond(send, 503 if exc.retryable else 200)
             return
         except Exception:
             await _respond(send, 500)
