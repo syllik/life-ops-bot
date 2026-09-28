@@ -74,8 +74,8 @@ async def handle_message(
     )
     try:
         issue = await life_ops.capture(capture)
-    except GitHubError:
-        if propagate_github_errors:
+    except GitHubError as exc:
+        if propagate_github_errors and exc.retryable:
             raise
         await message.answer(SAVE_ERROR)
         return
@@ -109,8 +109,8 @@ async def handle_callback(
     )
     try:
         await operation(issue_number)
-    except GitHubError:
-        if propagate_github_errors:
+    except GitHubError as exc:
+        if propagate_github_errors and exc.retryable:
             raise
         await callback.answer(ACTION_ERROR, show_alert=True)
         return
