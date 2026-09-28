@@ -295,3 +295,18 @@ async def test_lifespan_and_non_http_scopes_are_safe() -> None:
     sent.clear()
     await webhook.app({"type": "websocket"}, receive, send)
     assert sent == []
+
+
+def test_webhook_router_enables_github_error_propagation(monkeypatch) -> None:
+    import life_ops_bot.telegram as telegram_module
+
+    calls = []
+
+    def fake_build_router(life_ops, allowed_user_id, *, propagate_github_errors):
+        calls.append((life_ops, allowed_user_id, propagate_github_errors))
+        return "router"
+
+    monkeypatch.setattr(telegram_module, "build_router", fake_build_router)
+
+    assert webhook._build_router("core", 123) == "router"
+    assert calls == [("core", 123, True)]
