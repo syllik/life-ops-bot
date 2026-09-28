@@ -126,6 +126,8 @@ async def test_setup_errors_are_sanitized(response: httpx.Response) -> None:
     message = str(exc_info.value)
     assert "tg-secret-token" not in message
     assert "private" not in message
+    assert exc_info.value.__cause__ is None
+    assert exc_info.value.__context__ is None
 
 
 def test_safe_info_keeps_only_operational_fields() -> None:
