@@ -9,6 +9,7 @@ def base_env() -> dict[str, str]:
     return {
         "TELEGRAM_BOT_TOKEN": " tg-token ",
         "TELEGRAM_ALLOWED_USER_ID": "123",
+        "TELEGRAM_WEBHOOK_SECRET": " hook_secret-123 ",
         "GITHUB_TOKEN": " gh-token ",
         "GITHUB_REPOSITORY": " owner/tasks ",
     }
@@ -19,8 +20,39 @@ def test_settings_from_env_requires_and_normalizes_github_repository() -> None:
 
     assert settings.telegram_bot_token == "tg-token"
     assert settings.telegram_allowed_user_id == 123
+    assert settings.telegram_webhook_secret == "hook_secret-123"
     assert settings.github_token == "gh-token"
     assert settings.github_repository == "owner/tasks"
+
+
+def test_webhook_secret_is_optional_for_local_polling_but_required_by_webhook() -> None:
+    env = base_env()
+    del env["TELEGRAM_WEBHOOK_SECRET"]
+    settings = Settings.from_env(env)
+
+    assert settings.telegram_webhook_secret is None
+    with pytest.raises(ConfigError, match="required for webhook transport"):
+        settings.require_webhook_secret()
+
+
+def test_require_webhook_secret_returns_configured_value() -> None:
+    assert Settings.from_env(base_env()).require_webhook_secret() == "hook_secret-123"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "contains space",
+        "bad!",
+        "x" * 257,
+    ],
+)
+def test_webhook_secret_rejects_values_telegram_will_not_accept(value: str) -> None:
+    env = base_env()
+    env["TELEGRAM_WEBHOOK_SECRET"] = value
+
+    with pytest.raises(ConfigError, match="TELEGRAM_WEBHOOK_SECRET"):
+        Settings.from_env(env)
 
 
 def test_load_runtime_env_reads_optional_dotenv_and_process_env_wins(tmp_path: Path) -> None:
@@ -28,6 +60,7 @@ def test_load_runtime_env_reads_optional_dotenv_and_process_env_wins(tmp_path: P
     env_file.write_text(
         "TELEGRAM_BOT_TOKEN=file-token\n"
         "TELEGRAM_ALLOWED_USER_ID=123\n"
+        "TELEGRAM_WEBHOOK_SECRET=file-secret\n"
         "GITHUB_TOKEN=file-github-token\n"
         "GITHUB_REPOSITORY=owner/tasks\n",
         encoding="utf-8",
@@ -41,6 +74,7 @@ def test_load_runtime_env_reads_optional_dotenv_and_process_env_wins(tmp_path: P
     assert loaded == {
         "TELEGRAM_BOT_TOKEN": "file-token",
         "TELEGRAM_ALLOWED_USER_ID": "123",
+        "TELEGRAM_WEBHOOK_SECRET": "file-secret",
         "GITHUB_TOKEN": "runtime-github-token",
         "GITHUB_REPOSITORY": "owner/tasks",
     }

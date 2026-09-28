@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 
 from aiogram import Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
@@ -21,21 +22,42 @@ SAVE_ERROR = "❌ Couldn't save this item. Please try again."
 ACTION_ERROR = "❌ Couldn't update this item. Please try again."
 
 
-def build_router(life_ops: LifeOps, allowed_user_id: int) -> Router:
+def build_router(
+    life_ops: LifeOps,
+    allowed_user_id: int,
+    *,
+    propagate_github_errors: bool = False,
+) -> Router:
     router = Router(name="life-ops")
 
     @router.message()
     async def capture_message(message: Message) -> None:
-        await handle_message(message, life_ops, allowed_user_id)
+        await handle_message(
+            message,
+            life_ops,
+            allowed_user_id,
+            propagate_github_errors=propagate_github_errors,
+        )
 
     @router.callback_query()
     async def issue_callback(callback: CallbackQuery) -> None:
-        await handle_callback(callback, life_ops, allowed_user_id)
+        await handle_callback(
+            callback,
+            life_ops,
+            allowed_user_id,
+            propagate_github_errors=propagate_github_errors,
+        )
 
     return router
 
 
-async def handle_message(message: Message, life_ops: LifeOps, allowed_user_id: int) -> None:
+async def handle_message(
+    message: Message,
+    life_ops: LifeOps,
+    allowed_user_id: int,
+    *,
+    propagate_github_errors: bool = False,
+) -> None:
     sender = message.from_user
     if sender is None or sender.id != allowed_user_id:
         return
@@ -53,7 +75,9 @@ async def handle_message(message: Message, life_ops: LifeOps, allowed_user_id: i
     )
     try:
         issue = await life_ops.capture(capture)
-    except GitHubError:
+    except GitHubError as exc:
+        if propagate_github_errors and exc.retryable:
+            raise
         await message.answer(SAVE_ERROR)
         return
 
@@ -64,14 +88,20 @@ async def handle_message(message: Message, life_ops: LifeOps, allowed_user_id: i
     )
 
 
-async def handle_callback(callback: CallbackQuery, life_ops: LifeOps, allowed_user_id: int) -> None:
+async def handle_callback(
+    callback: CallbackQuery,
+    life_ops: LifeOps,
+    allowed_user_id: int,
+    *,
+    propagate_github_errors: bool = False,
+) -> None:
     sender = callback.from_user
     if sender.id != allowed_user_id:
         return
 
     parsed = parse_callback(callback.data)
     if parsed is None:
-        await callback.answer(ACTION_ERROR, show_alert=True)
+        await _answer_callback(callback, ACTION_ERROR, show_alert=True)
         return
 
     action, issue_number = parsed
@@ -80,11 +110,33 @@ async def handle_callback(callback: CallbackQuery, life_ops: LifeOps, allowed_us
     )
     try:
         await operation(issue_number)
-    except GitHubError:
-        await callback.answer(ACTION_ERROR, show_alert=True)
+    except GitHubError as exc:
+        if propagate_github_errors and exc.retryable:
+            raise
+        await _answer_callback(callback, ACTION_ERROR, show_alert=True)
         return
 
-    await callback.answer("Done" if action == "done" else "Moved to Later")
+    await _answer_callback(
+        callback,
+        "Done" if action == "done" else "Moved to Later",
+    )
+
+
+async def _answer_callback(
+    callback: CallbackQuery,
+    text: str,
+    *,
+    show_alert: bool = False,
+) -> None:
+    try:
+        if show_alert:
+            await callback.answer(text, show_alert=True)
+        else:
+            await callback.answer(text)
+    except TelegramBadRequest:
+        # Callback answers are time-limited by Telegram. A 400 cannot be repaired by
+        # redelivering the immutable callback, while network/5xx errors still propagate.
+        return
 
 
 def saved_keyboard(issue: Issue) -> InlineKeyboardMarkup:

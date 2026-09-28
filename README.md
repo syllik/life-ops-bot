@@ -1,126 +1,226 @@
 # life-ops-bot
 
-A small, public MIT Telegram interface for one self-hosted user and one explicitly configured GitHub repository. Each deployment authorizes one exact numeric Telegram user and uses that repository's GitHub Issues as its only durable application state. The runtime does not depend on access to any maintainer-owned repository.
+A small public MIT Telegram interface for one self-hosted user and one explicitly configured GitHub repository. Each deployment authorizes one exact numeric Telegram user ID and uses that repository's GitHub Issues as its only durable application state.
 
-## Current behavior and repository contract
+## Runtime model
+
+Production uses Telegram webhooks:
 
 ```text
-Telegram text / link / forward
-    -> exact numeric user authorization
+Telegram
+  -> POST /api/telegram/webhook
+  -> Vercel / Starlette ASGI app
+  -> exact numeric user authorization
+  -> existing bot/domain logic
+  -> GitHub Issues
+  -> Telegram response
+```
+
+GitHub Issues remain the source of truth across cold starts and redeploys. There is no application database, queue, local persistence, or always-running process.
+
+Long polling remains available only for local/development use. Telegram webhooks and long polling are mutually exclusive.
+
+## Current behavior
+
+Accepted input: text, links, and forwarded Telegram messages.
+
+```text
+Telegram input
+    -> authorize exact numeric sender
     -> preserve original input
-    -> create an open GitHub Issue with state:inbox
+    -> create/open GitHub Issue with state:inbox
     -> reply with Saved + Done / Later / GitHub actions
 ```
 
-Open Issues are active and closed Issues are done. The bot-managed state labels required by the current behavior are `state:inbox` and `state:later`. Startup checks that the configured repository is accessible and Issues are enabled, then creates either required label if missing. If both labels already exist, startup performs a semantics-preserving update with the existing color to verify Issues write access. Any failed check stops startup before Telegram polling.
+Open Issues are active and closed Issues are done. The required bot-owned labels are:
 
-`Later` reopens the Issue, removes conflicting labels in the `state:*` namespace, and sets exactly `state:later`. It preserves unrelated labels. Other labels are optional and are not required for the current bot behavior. Captures use a deterministic title and preserve the original Telegram input in the Issue body.
+- `state:inbox`
+- `state:later`
 
-Capture writes use `(telegram chat_id, message_id)` as a stable source key in bot-owned Issue body metadata (`schema: 1`). Before creating an Issue, the bot scans the 100 most recently created Issues for that key. This is best-effort deduplication, not transactional exactly-once delivery: a concurrent race or a retry older than the scan window can still create a duplicate. `Done` and `Later` are idempotent state-setting operations.
+`Later` reopens the Issue, removes conflicting `state:*` labels, sets `state:later`, and preserves unrelated labels.
 
-The bot uses Telegram long polling. It has no public HTTP endpoint, database, queue, GitHub Project, or other durable state store. GitHub Issues remain the source of truth after process restarts.
+Capture writes use `(telegram chat_id, message_id)` as a stable source key in bot-owned Issue metadata. The bot scans recent Issues before creating a new one. This makes normal Telegram retry delivery idempotent; the setup helper also registers the webhook with `max_connections=1` to avoid normal concurrent delivery races.
 
-## First run
+## Requirements
 
-Python 3.12+ is required.
+- Python 3.12+
+- Telegram bot token from the official `@BotFather`
+- exact numeric Telegram user ID allowed to use the deployment
+- GitHub repository with Issues enabled
+- fine-grained GitHub PAT scoped to that repository with **Issues: Read and write**
+- Vercel account for the reference production deployment
 
-Create a virtual environment and install the project:
+## Configuration
+
+Copy the example for local use:
+
+```bash
+cp .env.example .env
+chmod 600 .env
+```
+
+Runtime values:
+
+- `TELEGRAM_BOT_TOKEN` — secret.
+- `TELEGRAM_ALLOWED_USER_ID` — exact positive numeric Telegram user ID.
+- `GITHUB_TOKEN` — secret fine-grained GitHub PAT.
+- `GITHUB_REPOSITORY` — target in `owner/repository` form.
+- `TELEGRAM_WEBHOOK_SECRET` — production webhook secret. Telegram accepts 1-256 characters from `A-Z a-z 0-9 _ -`.
+
+`TELEGRAM_WEBHOOK_SECRET` is optional for local polling but required by the production webhook transport.
+
+Generate a suitable webhook secret locally:
+
+```bash
+python3 -c 'import secrets; print(secrets.token_urlsafe(32))'
+```
+
+Keep real tokens and secrets out of Git, logs, screenshots, support messages, and shell command history.
+
+## GitHub credential
+
+Create a fine-grained personal access token for only the target repository.
+
+Required repository permission:
+
+```text
+Issues: Read and write
+```
+
+Contents and Administration permissions are not required.
+
+At runtime the bot validates repository access and Issues support, creates missing required state labels, and verifies Issues write capability.
+
+## Production deployment on Vercel
+
+The repository exposes a Starlette ASGI app from the root `main.py`. Vercel detects the Python app and installs dependencies from `pyproject.toml`.
+
+1. Import this repository into Vercel.
+2. Use the repository's default branch for Production (currently `master`).
+3. Configure these Production environment variables:
+   - `TELEGRAM_BOT_TOKEN`
+   - `TELEGRAM_ALLOWED_USER_ID`
+   - `TELEGRAM_WEBHOOK_SECRET`
+   - `GITHUB_TOKEN`
+   - `GITHUB_REPOSITORY`
+4. Deploy.
+5. Copy the stable production URL, for example `https://life-ops-bot.vercel.app`.
+6. Register the webhook with the setup helper described below.
+7. Verify webhook status and send a Telegram message.
+
+The production Telegram endpoint is:
+
+```text
+https://<production-host>/api/telegram/webhook
+```
+
+Do not register a temporary Vercel preview URL as the normal production webhook.
+
+## Webhook setup
+
+Install the project locally first:
 
 ```bash
 python -m venv .venv
 . .venv/bin/activate
 pip install -e '.[dev]'
-cp .env.example .env
-chmod 600 .env
 ```
 
-The local `.env` file is ignored by Git and is the simplest first-run configuration path. Deployment platforms can inject the same names as normal environment variables; process environment variables always override values from `.env`.
+Put the same Telegram configuration in the local untracked `.env`. The setup helper reads the bot token and webhook secret from configuration, so they do not need to appear in the command itself.
 
-Configure these values in `.env`:
-
-- `TELEGRAM_BOT_TOKEN` — secret token created by Telegram's official `@BotFather`.
-- `TELEGRAM_ALLOWED_USER_ID` — the exact positive numeric Telegram user ID allowed to use this deployment.
-- `GITHUB_TOKEN` — secret GitHub credential for the selected repository.
-- `GITHUB_REPOSITORY` — non-secret repository name in `owner/repository` form.
-
-### Telegram setup
-
-1. Open Telegram's official `@BotFather`, create a bot with `/newbot`, and copy the token into `TELEGRAM_BOT_TOKEN`.
-2. Send any message to the new bot.
-3. With the virtual environment active and the token already saved in `.env`, run the command below. It reads the token locally and prints sender IDs from the bot's recent updates without putting the token in your shell command history:
+Register the production webhook using only the HTTPS origin (scheme + host, with no path):
 
 ```bash
-python - <<'PY'
-from dotenv import dotenv_values
-import httpx
-
-token = dotenv_values(".env", interpolate=False)["TELEGRAM_BOT_TOKEN"]
-response = httpx.get(
-    f"https://api.telegram.org/bot{token}/getUpdates",
-    timeout=10,
-)
-response.raise_for_status()
-
-for update in response.json().get("result", []):
-    message = update.get("message") or update.get("edited_message")
-    if not message or "from" not in message:
-        continue
-    sender = message["from"]
-    label = sender.get("username") or sender.get("first_name") or ""
-    print(sender["id"], label)
-PY
+life-ops-webhook set https://<production-host>
 ```
 
-Copy your numeric ID into `TELEGRAM_ALLOWED_USER_ID`. The runtime authorizes exactly that ID.
+The helper registers:
 
-### GitHub setup
+- `/api/telegram/webhook`
+- Telegram `secret_token`
+- `max_connections=1`
+- only `message` and `callback_query` updates
 
-Create or choose the repository whose Issues will hold the life-ops state. Create a fine-grained personal access token scoped only to that repository with **Issues: Read and write** permission. The current contract does not require Contents or Administration permission.
+Check status:
 
-Put the token in `GITHUB_TOKEN` and the repository name in `GITHUB_REPOSITORY`.
+```bash
+life-ops-webhook info
+```
 
-Start the bot:
+Remove the webhook before returning to local polling:
+
+```bash
+life-ops-webhook delete
+```
+
+Only use `--drop-pending-updates` when you intentionally want to discard undelivered Telegram updates:
+
+```bash
+life-ops-webhook delete --drop-pending-updates
+```
+
+Telegram does not allow `getUpdates`/long polling while an outgoing webhook is configured.
+
+## Webhook security and retry behavior
+
+Incoming requests must carry the configured Telegram header:
+
+```text
+X-Telegram-Bot-Api-Secret-Token
+```
+
+A missing or incorrect secret is rejected before the HTTP body is read. After authenticated transport parsing, the exact numeric Telegram sender is checked before aiogram/domain processing or GitHub access.
+
+Telegram retries webhook delivery when the endpoint returns a non-2xx status. Retryable GitHub failures (network errors, primary/secondary rate limits, and 5xx responses) return a non-2xx response. Repository-contract failures during cold start also remain retryable so correcting repository configuration or permissions can recover the original Telegram update. Permanent per-update GitHub failures are acknowledged after one sanitized user-facing error so stale or inaccessible Issues do not enter an endless retry loop. Unauthorized Telegram senders are safely ignored with success.
+
+No secret is written to GitHub Issues.
+
+## Local development with long polling
+
+Long polling remains useful as a local development fallback.
+
+First make sure the webhook is removed:
+
+```bash
+life-ops-webhook delete
+```
+
+Then run:
 
 ```bash
 life-ops-bot
 ```
 
-Startup validates repository access, confirms Issues are enabled, bootstraps the required state labels if needed, and verifies Issues write access before Telegram polling starts.
+The same core, Telegram router, authorization rules, GitHub adapter, and repository contract are reused by both transports.
 
-GitHub App authentication may be a later option for more scalable or long-lived installations. It is not implemented in the current version.
+## Reminders
 
-## Configuration precedence
+Reminder scheduling is intentionally outside the webhook request lifecycle.
 
-The runtime reads an optional local `.env` file and then overlays the process environment. This gives local/self-hosted users a no-`export` first run while keeping container and hosting-provider configuration conventional.
+When reminders are implemented:
 
-Secrets are:
+- reminder state must remain durable;
+- an external durable scheduler/trigger should wake delivery;
+- missed scheduler runs must be recoverable from persisted due state;
+- no reminder may depend on an in-memory timer surviving a Vercel cold start.
 
-- `TELEGRAM_BOT_TOKEN`
-- `GITHUB_TOKEN`
-
-Non-secret configuration is:
-
-- `TELEGRAM_ALLOWED_USER_ID`
-- `GITHUB_REPOSITORY`
-
-Keep real tokens out of Git, logs, examples, screenshots, and support conversations. The application does not write secrets back to disk.
+This repository does not currently implement the final reminder scheduler.
 
 ## Validation
 
 ```bash
 pytest
 ruff check .
+git diff --check
 ```
+
+Tests use fakes and mock transports. They do not require production Telegram, GitHub, or Vercel credentials.
 
 ## Architecture boundaries
 
-Unauthorized Telegram users are rejected before private message text is read, GitHub is called, or a Telegram response is sent. GitHub errors returned to Telegram are sanitized and never include private response bodies. Core behavior is independent of Telegram and GitHub implementations; the current adapters are aiogram 3.x and a small httpx GitHub REST client.
+Core behavior is independent of Vercel. Vercel is the reference production host; the transport boundary is explicit so another ASGI/serverless host can reuse the same application logic.
 
-The Issue body metadata is owned by the bot and is independent of the target repository's name or optional label taxonomy. Future classifier or reminder features can use optional labels and bot-owned metadata, but neither feature is part of the current repository contract.
-
-## Deferred intentionally
-
-Not part of the current slice: LLM classification, navigation/search, reminders, deployment/containerization, multi-user support, webhooks, or a public server.
+Unauthorized Telegram users are rejected before application-level private message processing and GitHub side effects. GitHub errors surfaced to users are sanitized and never include private response bodies or credentials.
 
 ## License
 
