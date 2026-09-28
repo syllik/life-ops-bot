@@ -133,7 +133,11 @@ def _make_dispatcher() -> Any:  # pragma: no cover
 def _build_router(life_ops: LifeOps, allowed_user_id: int) -> Any:  # pragma: no cover
     from .telegram import build_router
 
-    return build_router(life_ops, allowed_user_id)
+    return build_router(
+        life_ops,
+        allowed_user_id,
+        propagate_github_errors=True,
+    )
 
 
 async def _handle_lifespan(receive: Receive, send: Send) -> None:
