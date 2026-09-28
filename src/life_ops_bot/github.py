@@ -15,6 +15,10 @@ BOOTSTRAP_LABEL_DESCRIPTION = "Managed by life-ops-bot."
 class GitHubError(RuntimeError):
     """A sanitized GitHub adapter error safe to handle without private response bodies."""
 
+    def __init__(self, message: str, *, retryable: bool = False) -> None:
+        super().__init__(message)
+        self.retryable = retryable
+
 
 class GitHubIssues:
     def __init__(
@@ -51,7 +55,8 @@ class GitHubIssues:
         except GitHubError as exc:
             raise GitHubError(
                 "GitHub repository access check failed; verify the configured owner/repo "
-                "and token access"
+                "and token access",
+                retryable=exc.retryable,
             ) from exc
 
         if repository.get("has_issues") is not True:
@@ -66,7 +71,8 @@ class GitHubIssues:
                 response = await self._request("GET", label_path, allow_not_found=True)
             except GitHubError as exc:
                 raise GitHubError(
-                    "GitHub required-label check failed; verify repository Issues read access"
+                    "GitHub required-label check failed; verify repository Issues read access",
+                    retryable=exc.retryable,
                 ) from exc
 
             if response.status_code == 404:
@@ -84,7 +90,8 @@ class GitHubIssues:
                 except GitHubError as exc:
                     raise GitHubError(
                         "GitHub required-label bootstrap failed; verify Issues: Read and write "
-                        "permission"
+                        "permission",
+                        retryable=exc.retryable,
                     ) from exc
                 created_label = True
             else:
@@ -99,7 +106,8 @@ class GitHubIssues:
             except GitHubError as exc:
                 raise GitHubError(
                     "GitHub repository contract write check failed; verify Issues: Read and "
-                    "write permission"
+                    "write permission",
+                    retryable=exc.retryable,
                 ) from exc
             _label_from_json(updated_response, label)
 
@@ -179,12 +187,32 @@ class GitHubIssues:
     ) -> httpx.Response:
         try:
             response = await self._client.request(method, path, **kwargs)
-            if allow_not_found and response.status_code == 404:
-                return response
-            response.raise_for_status()
+        except httpx.RequestError as exc:
+            raise GitHubError("GitHub request failed", retryable=True) from exc
+
+        if allow_not_found and response.status_code == 404:
             return response
-        except httpx.HTTPError as exc:
-            raise GitHubError("GitHub request failed") from exc
+
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise GitHubError(
+                "GitHub request failed",
+                retryable=_retryable_status(response),
+            ) from exc
+        return response
+
+
+def _retryable_status(response: httpx.Response) -> bool:
+    status = response.status_code
+    if status in {408, 429} or status >= 500:
+        return True
+    if status == 403:
+        return (
+            response.headers.get("retry-after") is not None
+            or response.headers.get("x-ratelimit-remaining") == "0"
+        )
+    return False
 
 
 def _response_json(response: httpx.Response) -> Any:
