@@ -17,6 +17,8 @@ Scope = Mapping[str, Any]
 Receive = Callable[[], Awaitable[dict[str, Any]]]
 Send = Callable[[dict[str, Any]], Awaitable[None]]
 
+_repository_contract_ready = False
+
 
 async def app(scope: Scope, receive: Receive, send: Send) -> None:
     if scope.get("type") == "lifespan":
@@ -94,12 +96,16 @@ async def app(scope: Scope, receive: Receive, send: Send) -> None:
 
 
 async def process_update(settings: Settings, bot: Any, update: Any) -> None:
+    global _repository_contract_ready
+
     dispatcher = _make_dispatcher()
     async with GitHubIssues(
         token=settings.github_token,
         repository=settings.github_repository,
     ) as github:
-        await github.ensure_repository_contract()
+        if not _repository_contract_ready:
+            await github.ensure_repository_contract()
+            _repository_contract_ready = True
         dispatcher.include_router(
             _build_router(LifeOps(github), settings.telegram_allowed_user_id)
         )
