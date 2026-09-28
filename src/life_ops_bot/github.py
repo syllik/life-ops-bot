@@ -20,6 +20,13 @@ class GitHubError(RuntimeError):
         self.retryable = retryable
 
 
+class GitHubContractError(GitHubError):
+    """A repository-contract failure that must keep the Telegram update retryable."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, retryable=True)
+
+
 class GitHubIssues:
     def __init__(
         self,
@@ -49,6 +56,14 @@ class GitHubIssues:
             await self._client.aclose()
 
     async def ensure_repository_contract(self) -> None:
+        try:
+            await self._ensure_repository_contract()
+        except GitHubContractError:
+            raise
+        except GitHubError as exc:
+            raise GitHubContractError(str(exc)) from exc
+
+    async def _ensure_repository_contract(self) -> None:
         try:
             repository_response = await self._request("GET", f"/repos/{self._repository}")
             repository = _json_object(repository_response)
@@ -211,8 +226,23 @@ def _retryable_status(response: httpx.Response) -> bool:
         return (
             response.headers.get("retry-after") is not None
             or response.headers.get("x-ratelimit-remaining") == "0"
+            or _is_secondary_rate_limit(response)
         )
     return False
+
+
+def _is_secondary_rate_limit(response: httpx.Response) -> bool:
+    try:
+        data = response.json()
+    except ValueError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    message = data.get("message")
+    if not isinstance(message, str):
+        return False
+    normalized = message.lower()
+    return "secondary rate limit" in normalized or "abuse detection" in normalized
 
 
 def _response_json(response: httpx.Response) -> Any:
