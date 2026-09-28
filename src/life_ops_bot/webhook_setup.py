@@ -91,16 +91,23 @@ async def _telegram_call(
 ) -> Mapping[str, object]:
     owns_client = client is None
     api = client or httpx.AsyncClient(base_url=TELEGRAM_API, timeout=15.0)
+    failed = False
+    data: object = None
     try:
         try:
             response = await api.post(f"/bot{token}/{method}", json=payload)
             response.raise_for_status()
             data = response.json()
-        except (httpx.HTTPError, ValueError) as exc:
-            raise WebhookSetupError(f"Telegram {method} request failed") from exc
+        except (httpx.HTTPError, ValueError):
+            failed = True
     finally:
         if owns_client:
             await api.aclose()
+
+    if failed:
+        # Raise outside the exception handler so credential-bearing HTTPX exceptions
+        # are not retained as __cause__ or __context__.
+        raise WebhookSetupError(f"Telegram {method} request failed")
 
     if not isinstance(data, dict) or data.get("ok") is not True:
         raise WebhookSetupError(f"Telegram {method} request failed")
