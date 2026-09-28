@@ -123,7 +123,7 @@ def test_saved_keyboard() -> None:
 
 
 @pytest.mark.asyncio
-async def test_github_callback_failure_can_propagate_after_error_reply_for_webhook_retry() -> None:
+async def test_github_callback_failure_propagates_without_retry_spam() -> None:
     life_ops = FakeLifeOps()
     life_ops.action_error = True
     callback = fake_callback(data="done:44")
@@ -136,4 +136,4 @@ async def test_github_callback_failure_can_propagate_after_error_reply_for_webho
             propagate_github_errors=True,
         )
 
-    callback.answer.assert_awaited_once_with(ACTION_ERROR, show_alert=True)
+    callback.answer.assert_not_awaited()
