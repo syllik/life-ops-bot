@@ -49,6 +49,7 @@ class NavigationCallback:
     kind: str
     page: int = 0
     source_page: int = 0
+    source_view: str = "goals"
     issue_number: int | None = None
     view: str | None = None
     action: str | None = None
@@ -218,6 +219,7 @@ async def _handle_navigation_callback(
                 navigation.issue_number,
                 navigation.page,
                 source_page=navigation.source_page,
+                source_view=navigation.source_view,
             )
         elif (
             navigation.kind == "item"
@@ -230,6 +232,7 @@ async def _handle_navigation_callback(
                 navigation.view,
                 navigation.page,
                 source_page=navigation.source_page,
+                source_view=navigation.source_view,
             )
         elif (
             navigation.kind == "action"
@@ -248,6 +251,7 @@ async def _handle_navigation_callback(
                     issue.number,
                     navigation.page,
                     source_page=navigation.source_page,
+                    source_view=navigation.source_view,
                 )
             else:
                 text, markup = render_item(
@@ -255,6 +259,7 @@ async def _handle_navigation_callback(
                     navigation.view,
                     navigation.page,
                     source_page=navigation.source_page,
+                    source_view=navigation.source_view,
                 )
         else:
             await _answer_callback(callback, ACTION_ERROR, show_alert=True)
@@ -423,11 +428,11 @@ def render_view(
     text = f"{title} — {len(items)}\nPage {current_page + 1}/{page_count}\nTap an item to open."
     rows: list[list[InlineKeyboardButton]] = []
     for issue in page_items:
-        if view == "goals":
+        if issue.number in goal_numbers:
             children = relations[issue.number]
             done = sum(child.state == "closed" for child in children)
             label = f"🎯 #{issue.number} {_short_title(issue.title, 34)} · {done}/{len(children)}"
-            callback_data = f"goal:{issue.number}:{current_page}:0"
+            callback_data = f"goal:{issue.number}:{view}:{current_page}:0"
         else:
             icon = _status_icon(issue)
             label = f"{icon} #{issue.number} {_short_title(issue.title, 45)}"
@@ -446,6 +451,7 @@ def render_goal(
     page: int,
     *,
     source_page: int = 0,
+    source_view: str = "goals",
 ) -> tuple[str, InlineKeyboardMarkup]:
     by_number = {issue.number: issue for issue in issues}
     goal = by_number.get(goal_number)
@@ -471,7 +477,8 @@ def render_goal(
                 InlineKeyboardButton(
                     text=f"{_status_icon(child)} #{child.number} {_short_title(child.title, 43)}",
                     callback_data=(
-                        f"item:{child.number}:g{goal.number}:{source_page}:{current_page}"
+                        f"item:{child.number}:g{goal.number}:{source_view}:{source_page}:"
+                        f"{current_page}"
                     ),
                 )
             ]
@@ -484,7 +491,8 @@ def render_goal(
                 InlineKeyboardButton(
                     text="◀️",
                     callback_data=(
-                        f"goal:{goal.number}:{source_page}:{current_page - 1}"
+                        f"goal:{goal.number}:{source_view}:{source_page}:"
+                        f"{current_page - 1}"
                     ),
                 )
             )
@@ -499,7 +507,8 @@ def render_goal(
                 InlineKeyboardButton(
                     text="▶️",
                     callback_data=(
-                        f"goal:{goal.number}:{source_page}:{current_page + 1}"
+                        f"goal:{goal.number}:{source_view}:{source_page}:"
+                        f"{current_page + 1}"
                     ),
                 )
             )
@@ -511,7 +520,8 @@ def render_goal(
             InlineKeyboardButton(
                 text="Done",
                 callback_data=(
-                    f"action:done:{goal.number}:goal:{source_page}:{current_page}"
+                    f"action:done:{goal.number}:goal:{source_view}:{source_page}:"
+                    f"{current_page}"
                 ),
             )
         )
@@ -519,7 +529,8 @@ def render_goal(
         InlineKeyboardButton(
             text="Later",
             callback_data=(
-                f"action:later:{goal.number}:goal:{source_page}:{current_page}"
+                f"action:later:{goal.number}:goal:{source_view}:{source_page}:"
+                f"{current_page}"
             ),
         )
     )
@@ -529,7 +540,7 @@ def render_goal(
         [
             InlineKeyboardButton(
                 text="← Back",
-                callback_data=f"nav:goals:{source_page}",
+                callback_data=f"nav:{source_view}:{source_page}",
             )
         ]
     )
@@ -542,6 +553,7 @@ def render_item(
     page: int,
     *,
     source_page: int = 0,
+    source_view: str = "goals",
 ) -> tuple[str, InlineKeyboardMarkup]:
     if issue.state == "closed":
         status = "✅ Done"
@@ -562,6 +574,7 @@ def render_item(
                     context,
                     page,
                     source_page,
+                    source_view,
                 ),
             )
         )
@@ -575,13 +588,14 @@ def render_item(
                     context,
                     page,
                     source_page,
+                    source_view,
                 ),
             )
         )
     action_row.append(InlineKeyboardButton(text="GitHub", url=issue.url))
 
     if context.startswith("g") and context[1:].isdigit():
-        back_data = f"goal:{int(context[1:])}:{source_page}:{page}"
+        back_data = f"goal:{int(context[1:])}:{source_view}:{source_page}:{page}"
     elif context in VIEW_LABELS:
         back_data = f"nav:{context}:{page}"
     else:
@@ -606,6 +620,17 @@ def parse_navigation_callback(data: str | None) -> NavigationCallback | None:
         if len(parts) == 3 and parts[0] == "nav" and parts[1] in VIEW_LABELS:
             page = int(parts[2])
             return _navigation_callback(kind="nav", view=parts[1], page=page)
+        if len(parts) == 5 and parts[0] == "goal" and parts[2] in VIEW_LABELS:
+            issue_number = int(parts[1])
+            source_page = int(parts[3])
+            page = int(parts[4])
+            return _navigation_callback(
+                kind="goal",
+                issue_number=issue_number,
+                page=page,
+                source_page=source_page,
+                source_view=parts[2],
+            )
         if len(parts) == 4 and parts[0] == "goal":
             issue_number = int(parts[1])
             source_page = int(parts[2])
@@ -620,6 +645,18 @@ def parse_navigation_callback(data: str | None) -> NavigationCallback | None:
             issue_number = int(parts[1])
             page = int(parts[2])
             return _navigation_callback(kind="goal", issue_number=issue_number, page=page)
+        if len(parts) == 6 and parts[0] == "item" and parts[3] in VIEW_LABELS:
+            issue_number = int(parts[1])
+            source_page = int(parts[4])
+            page = int(parts[5])
+            return _navigation_callback(
+                kind="item",
+                issue_number=issue_number,
+                view=parts[2],
+                page=page,
+                source_page=source_page,
+                source_view=parts[3],
+            )
         if len(parts) == 5 and parts[0] == "item":
             issue_number = int(parts[1])
             source_page = int(parts[3])
@@ -639,6 +676,24 @@ def parse_navigation_callback(data: str | None) -> NavigationCallback | None:
                 issue_number=issue_number,
                 view=parts[2],
                 page=page,
+            )
+        if (
+            len(parts) == 7
+            and parts[0] == "action"
+            and parts[1] in {"done", "later"}
+            and parts[4] in VIEW_LABELS
+        ):
+            issue_number = int(parts[2])
+            source_page = int(parts[5])
+            page = int(parts[6])
+            return _navigation_callback(
+                kind="action",
+                issue_number=issue_number,
+                view=parts[3],
+                action=parts[1],
+                page=page,
+                source_page=source_page,
+                source_view=parts[4],
             )
         if (
             len(parts) == 6
@@ -680,11 +735,17 @@ def _navigation_callback(
     kind: str,
     page: int,
     source_page: int = 0,
+    source_view: str = "goals",
     issue_number: int | None = None,
     view: str | None = None,
     action: str | None = None,
 ) -> NavigationCallback | None:
-    if page < 0 or source_page < 0 or (issue_number is not None and issue_number <= 0):
+    if (
+        page < 0
+        or source_page < 0
+        or source_view not in VIEW_LABELS
+        or (issue_number is not None and issue_number <= 0)
+    ):
         return None
     if kind in {"item", "action"} and view is not None:
         if view not in VIEW_LABELS and view != "goal" and not (
@@ -695,6 +756,7 @@ def _navigation_callback(
         kind=kind,
         page=page,
         source_page=source_page,
+        source_view=source_view,
         issue_number=issue_number,
         view=view,
         action=action,
@@ -707,9 +769,13 @@ def _action_callback_data(
     context: str,
     page: int,
     source_page: int,
+    source_view: str,
 ) -> str:
     if context == "goal" or (context.startswith("g") and context[1:].isdigit()):
-        return f"action:{action}:{issue_number}:{context}:{source_page}:{page}"
+        return (
+            f"action:{action}:{issue_number}:{context}:{source_view}:"
+            f"{source_page}:{page}"
+        )
     return f"action:{action}:{issue_number}:{context}:{page}"
 
 

@@ -226,7 +226,7 @@ def test_goal_detail_shows_progress_children_actions_and_back() -> None:
     assert "Progress: 1/2 done · 1 remaining" in text
     assert markup.inline_keyboard[0][0].text.startswith("⬜ #11")
     assert markup.inline_keyboard[1][0].text.startswith("✅ #12")
-    assert markup.inline_keyboard[-2][0].callback_data == "action:done:10:goal:0:0"
+    assert markup.inline_keyboard[-2][0].callback_data == "action:done:10:goal:goals:0:0"
     assert markup.inline_keyboard[-1][0].callback_data == "nav:goals:0"
 
 
@@ -236,8 +236,8 @@ def test_item_detail_reflects_status_and_returns_to_goal() -> None:
     text, markup = render_item(current, "g10", 2)
 
     assert "Status: ✅ Done" in text
-    assert markup.inline_keyboard[0][0].callback_data == "action:later:11:g10:0:2"
-    assert markup.inline_keyboard[1][0].callback_data == "goal:10:0:2"
+    assert markup.inline_keyboard[0][0].callback_data == "action:later:11:g10:goals:0:2"
+    assert markup.inline_keyboard[1][0].callback_data == "goal:10:goals:0:2"
 
 
 @pytest.mark.asyncio
@@ -380,7 +380,7 @@ def test_goal_open_preserves_source_goals_page_separately_from_children_page() -
     _, goals_markup = render_view((*parents, *children), "goals", 1)
     goal_button = goals_markup.inline_keyboard[0][0]
 
-    assert goal_button.callback_data == "goal:9:1:0"
+    assert goal_button.callback_data == "goal:9:goals:1:0"
 
     _, goal_markup = render_goal(
         (*parents, *children),
@@ -389,6 +389,43 @@ def test_goal_open_preserves_source_goals_page_separately_from_children_page() -
         source_page=1,
     )
     assert goal_markup.inline_keyboard[-1][0].callback_data == "nav:goals:1"
+
+
+def test_completed_goal_in_done_opens_goal_detail_and_returns_to_done() -> None:
+    parent = issue(10, title="Finished plan", state="closed", body="- [x] #11 Child")
+    child = issue(11, title="Finished child", state="closed", body="Parent: #10")
+
+    _, done_markup = render_view((parent, child), "done", 0)
+
+    assert done_markup.inline_keyboard[0][0].callback_data == "goal:10:done:0:0"
+
+    _, goal_markup = render_goal(
+        (parent, child),
+        10,
+        0,
+        source_view="done",
+        source_page=0,
+    )
+
+    assert goal_markup.inline_keyboard[0][0].callback_data == "item:11:g10:done:0:0"
+    assert goal_markup.inline_keyboard[-1][0].callback_data == "nav:done:0"
+
+
+def test_completed_goal_child_returns_to_done_backed_goal_detail() -> None:
+    current = issue(11, title="Finished child", state="closed")
+
+    _, markup = render_item(
+        current,
+        "g10",
+        0,
+        source_view="done",
+        source_page=2,
+    )
+
+    assert markup.inline_keyboard[0][0].callback_data == (
+        "action:later:11:g10:done:2:0"
+    )
+    assert markup.inline_keyboard[1][0].callback_data == "goal:10:done:2:0"
 
 
 def test_goal_child_pagination_preserves_source_goals_page() -> None:
@@ -401,7 +438,7 @@ def test_goal_child_pagination_preserves_source_goals_page() -> None:
 
     _, markup = render_goal((parent, *children), 10, 0, source_page=3)
 
-    assert markup.inline_keyboard[8][1].callback_data == "goal:10:3:1"
+    assert markup.inline_keyboard[8][1].callback_data == "goal:10:goals:3:1"
     assert markup.inline_keyboard[-1][0].callback_data == "nav:goals:3"
 
 
@@ -413,6 +450,39 @@ def test_goal_child_pagination_preserves_source_goals_page() -> None:
         (
             "goal:18:3:2",
             NavigationCallback(kind="goal", issue_number=18, page=2, source_page=3),
+        ),
+        (
+            "goal:18:done:3:2",
+            NavigationCallback(
+                kind="goal",
+                issue_number=18,
+                page=2,
+                source_page=3,
+                source_view="done",
+            ),
+        ),
+        (
+            "item:22:g18:done:3:1",
+            NavigationCallback(
+                kind="item",
+                issue_number=22,
+                view="g18",
+                page=1,
+                source_page=3,
+                source_view="done",
+            ),
+        ),
+        (
+            "action:later:22:g18:done:3:1",
+            NavigationCallback(
+                kind="action",
+                issue_number=22,
+                view="g18",
+                action="later",
+                page=1,
+                source_page=3,
+                source_view="done",
+            ),
         ),
         (
             "item:22:g18:3:1",
@@ -593,9 +663,9 @@ def test_goal_detail_paginates_children_in_both_directions_and_closed_goal() -> 
 
     assert "Status: ✅ Done" in first_text
     assert first_markup.inline_keyboard[8][0].text == "1/2"
-    assert first_markup.inline_keyboard[8][1].callback_data == "goal:10:0:1"
+    assert first_markup.inline_keyboard[8][1].callback_data == "goal:10:goals:0:1"
     assert "Page" not in second_text
-    assert second_markup.inline_keyboard[2][0].callback_data == "goal:10:0:0"
+    assert second_markup.inline_keyboard[2][0].callback_data == "goal:10:goals:0:0"
     action_texts = [button.text for button in second_markup.inline_keyboard[-2]]
     assert "Done" not in action_texts
 

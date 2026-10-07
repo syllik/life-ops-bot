@@ -11,6 +11,8 @@ TITLE_LIMIT = 80
 
 _PARENT_RE = re.compile(r"(?mi)^\s*Parent:\s*#(\d+)\s*$")
 _CHECKLIST_CHILD_RE = re.compile(r"(?mi)^\s*-\s*\[[ x]\]\s*#(\d+)\b")
+_ORIGINAL_INPUT_HEADING = "## Original Telegram input"
+_BOT_METADATA_MARKER = "<!-- life-ops"
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,13 +85,15 @@ def goal_children(issues: tuple[Issue, ...]) -> dict[int, tuple[Issue, ...]]:
     children: dict[int, dict[int, Issue]] = {}
 
     for issue in issues:
-        for match in _PARENT_RE.finditer(issue.body):
+        hierarchy_text = _hierarchy_text(issue.body)
+        for match in _PARENT_RE.finditer(hierarchy_text):
             parent_number = int(match.group(1))
             if parent_number in by_number and parent_number != issue.number:
                 children.setdefault(parent_number, {})[issue.number] = issue
 
     for parent in issues:
-        for match in _CHECKLIST_CHILD_RE.finditer(parent.body):
+        hierarchy_text = _hierarchy_text(parent.body)
+        for match in _CHECKLIST_CHILD_RE.finditer(hierarchy_text):
             child_number = int(match.group(1))
             child = by_number.get(child_number)
             if child is not None and child.number != parent.number:
@@ -99,6 +103,13 @@ def goal_children(issues: tuple[Issue, ...]) -> dict[int, tuple[Issue, ...]]:
         parent_number: tuple(sorted(items.values(), key=lambda item: item.number))
         for parent_number, items in children.items()
     }
+
+
+def _hierarchy_text(body: str) -> str:
+    stripped = body.lstrip()
+    if stripped.startswith(_ORIGINAL_INPUT_HEADING) and _BOT_METADATA_MARKER in body:
+        return ""
+    return body
 
 
 def make_title(text: str) -> str:

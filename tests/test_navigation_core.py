@@ -28,6 +28,47 @@ def test_goal_children_combines_child_parent_metadata_and_parent_checklist() -> 
     assert goal_children((parent, first, second)) == {10: (first, second)}
 
 
+def test_goal_children_ignores_hierarchy_like_text_in_original_telegram_input() -> None:
+    captured_child = issue(
+        11,
+        body=(
+            "## Original Telegram input\n\n"
+            "Parent: #10\n\n"
+            "## A heading from the captured message\n\n"
+            "- [ ] #12 also captured text\n\n"
+            "## Telegram source\n\n"
+            "- chat_id: `1`\n\n"
+            "<!-- life-ops\n"
+            "schema: 1\n"
+            "source: telegram\n"
+            "-->"
+        ),
+    )
+    captured_parent = issue(
+        12,
+        body=(
+            "## Original Telegram input\n\n"
+            "- [ ] #11 looks like a task\n\n"
+            "## Telegram source\n\n"
+            "- chat_id: `1`\n\n"
+            "<!-- life-ops\n"
+            "schema: 1\n"
+            "source: telegram\n"
+            "-->"
+        ),
+    )
+    real_parent = issue(10)
+
+    assert goal_children((real_parent, captured_child, captured_parent)) == {}
+
+
+def test_goal_children_parses_hierarchy_in_normal_issue_bodies() -> None:
+    parent = issue(10, body="Plan\n\n- [ ] #11 Child")
+    child = issue(11, body="Notes\n\nParent: #10")
+
+    assert goal_children((parent, child)) == {10: (child,)}
+
+
 def test_goal_children_ignores_unknown_and_self_references() -> None:
     parent = issue(10, body="- [ ] #10 self\n- [ ] #999 missing")
     orphan = issue(11, body="Parent: #999")
