@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -7,6 +8,9 @@ INBOX_LABEL = "state:inbox"
 LATER_LABEL = "state:later"
 STATE_PREFIX = "state:"
 TITLE_LIMIT = 80
+
+_PARENT_RE = re.compile(r"(?mi)^\s*Parent:\s*#(\d+)\s*$")
+_CHECKLIST_CHILD_RE = re.compile(r"(?mi)^\s*-\s*\[[ x]\]\s*#(\d+)\b")
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,12 +33,17 @@ class Issue:
     title: str
     labels: tuple[str, ...] = ()
     state: str = "open"
+    body: str = ""
 
 
 class IssueStore(Protocol):
     async def find_by_source_key(self, source_key: str) -> Issue | None: ...
 
     async def create_issue(self, *, title: str, body: str, labels: tuple[str, ...]) -> Issue: ...
+
+    async def get_issue(self, issue_number: int) -> Issue: ...
+
+    async def list_issues(self, *, state: str = "all") -> tuple[Issue, ...]: ...
 
     async def close_issue(self, issue_number: int) -> Issue: ...
 
@@ -56,11 +65,40 @@ class LifeOps:
             labels=(INBOX_LABEL,),
         )
 
+    async def get_issue(self, issue_number: int) -> Issue:
+        return await self._issues.get_issue(issue_number)
+
+    async def list_issues(self, *, state: str = "all") -> tuple[Issue, ...]:
+        return await self._issues.list_issues(state=state)
+
     async def done(self, issue_number: int) -> Issue:
         return await self._issues.close_issue(issue_number)
 
     async def later(self, issue_number: int) -> Issue:
         return await self._issues.set_later(issue_number)
+
+
+def goal_children(issues: tuple[Issue, ...]) -> dict[int, tuple[Issue, ...]]:
+    by_number = {issue.number: issue for issue in issues}
+    children: dict[int, dict[int, Issue]] = {}
+
+    for issue in issues:
+        for match in _PARENT_RE.finditer(issue.body):
+            parent_number = int(match.group(1))
+            if parent_number in by_number and parent_number != issue.number:
+                children.setdefault(parent_number, {})[issue.number] = issue
+
+    for parent in issues:
+        for match in _CHECKLIST_CHILD_RE.finditer(parent.body):
+            child_number = int(match.group(1))
+            child = by_number.get(child_number)
+            if child is not None and child.number != parent.number:
+                children.setdefault(parent.number, {})[child.number] = child
+
+    return {
+        parent_number: tuple(sorted(items.values(), key=lambda item: item.number))
+        for parent_number, items in children.items()
+    }
 
 
 def make_title(text: str) -> str:

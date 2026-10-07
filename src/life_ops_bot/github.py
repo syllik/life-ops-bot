@@ -157,6 +157,43 @@ class GitHubIssues:
             raise GitHubError("GitHub did not apply required labels")
         return issue
 
+    async def get_issue(self, issue_number: int) -> Issue:
+        response = await self._request(
+            "GET",
+            f"/repos/{self._repository}/issues/{issue_number}",
+        )
+        data = _json_object(response)
+        if "pull_request" in data:
+            raise GitHubError("GitHub item is not an issue")
+        return _issue_from_json(data)
+
+    async def list_issues(self, *, state: str = "all") -> tuple[Issue, ...]:
+        if state not in {"open", "closed", "all"}:
+            raise ValueError("state must be open, closed, or all")
+
+        issues: list[Issue] = []
+        page = 1
+        while True:
+            response = await self._request(
+                "GET",
+                f"/repos/{self._repository}/issues",
+                params={
+                    "state": state,
+                    "sort": "updated",
+                    "direction": "desc",
+                    "per_page": 100,
+                    "page": page,
+                },
+            )
+            items = _json_list(response)
+            issues.extend(
+                _issue_from_json(item) for item in items if "pull_request" not in item
+            )
+            if len(items) < 100:
+                break
+            page += 1
+        return tuple(issues)
+
     async def close_issue(self, issue_number: int) -> Issue:
         response = await self._request(
             "PATCH",
@@ -293,10 +330,15 @@ def _issue_from_json(data: dict[str, Any]) -> Issue:
     except (KeyError, TypeError, ValueError) as exc:
         raise GitHubError("GitHub returned an incomplete issue") from exc
 
+    body = data.get("body") or ""
+    if not isinstance(body, str):
+        raise GitHubError("GitHub returned an invalid issue body")
+
     return Issue(
         number=number,
         url=url,
         title=title,
         labels=tuple(_label_names(data.get("labels", []))),
         state=str(data.get("state", "open")),
+        body=body,
     )

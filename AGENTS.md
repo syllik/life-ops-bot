@@ -50,7 +50,7 @@ This public MIT project is a self-hosted Telegram interface for one user and one
 
 ## Current behavior and future direction
 
-The current vertical slice is:
+The current capture vertical slice is:
 
 ```text
 Telegram text/link/forward
@@ -60,6 +60,8 @@ Telegram text/link/forward
   -> create an open GitHub Issue with state:inbox
   -> reply with Saved + Done / Later / GitHub actions
 ```
+
+Telegram also provides deterministic button-driven navigation. After the initial `/start`, expose a persistent native menu for Tasks, Goals, Later, and Done; use inline controls for item/goal details, back navigation, state actions, GitHub, and pagination. A goal is an existing parent Issue, derived from `Parent: #N` metadata and parent checklist Issue references; do not require a `type:goal` label. Navigation must read current durable state from GitHub Issues and must not interfere with ordinary capture.
 
 The core domain should not depend directly on Telegram or GitHub authentication mechanics. Keep GitHub access behind the existing adapter boundary. Future classifier or reminder behavior may use optional labels and bot-owned Issue body metadata, but those features and their taxonomies are not required now.
 
