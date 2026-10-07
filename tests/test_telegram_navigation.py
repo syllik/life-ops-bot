@@ -315,6 +315,24 @@ async def test_unauthorized_navigation_callback_has_no_side_effects() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("menu_text", [MENU_TASKS, MENU_GOALS, MENU_LATER, MENU_DONE])
+async def test_forwarded_menu_label_text_stays_on_capture_path(menu_text: str) -> None:
+    life_ops = FakeLifeOps()
+    message = fake_message(
+        text=menu_text,
+        forward_origin=SimpleNamespace(),
+    )
+
+    await handle_message(message, life_ops, 123)
+
+    assert len(life_ops.captures) == 1
+    assert life_ops.captures[0].text == menu_text
+    assert life_ops.list_calls == 0
+    assert message.answer.await_count == 1
+    assert message.answer.await_args.args[0].startswith("✅ Saved #99")
+
+
+@pytest.mark.asyncio
 async def test_forwarded_start_text_stays_on_capture_path() -> None:
     life_ops = FakeLifeOps()
     message = fake_message(

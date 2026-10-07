@@ -119,7 +119,7 @@ async def handle_message(
         )
         return
 
-    view = MENU_VIEWS.get(text)
+    view = MENU_VIEWS.get(text) if message.forward_origin is None else None
     if view is not None:
         await _send_view(
             message,
