@@ -43,7 +43,11 @@ The Issue body keeps original Telegram input, source identifiers, and the bot-ow
 
 ## Current Telegram behavior
 
-Accepted input: text, links, and forwarded Telegram messages. The current capture uses a deterministic title, stores the original input, applies `state:inbox`, and offers Done, Later, and GitHub actions. Done closes the Issue.
+Accepted capture input: text, links, and forwarded Telegram messages. Capture uses a deterministic title, stores the original input, applies `state:inbox`, and offers Done, Later, and GitHub actions. Done closes the Issue.
+
+Normal navigation is button-driven after the initial `/start` entry point. A persistent native Telegram keyboard exposes Tasks, Goals, Later, and Done. Lists and detail views use inline controls for opening items, returning through context, Done, Later, GitHub, and pagination. Navigation reads current state from GitHub Issues and does not create a separate durable navigation store.
+
+A goal is an Issue that acts as a real parent in the existing hierarchy; no `type:goal` taxonomy is required. Parent/child relations are resolved deterministically from child `Parent: #N` metadata and parent checklist Issue references. Goal detail shows completed and remaining child counts based on child Issue open/closed state.
 
 For production webhooks, reject a missing/incorrect webhook secret before reading the HTTP request body. After authenticated JSON transport parsing, reject unauthorized Telegram senders before aiogram/domain processing or GitHub access.
 

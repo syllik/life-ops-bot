@@ -32,6 +32,10 @@ Telegram input
     -> reply with Saved + Done / Later / GitHub actions
 ```
 
+Telegram navigation is button-driven after the initial `/start` entry point. The bot exposes a persistent native keyboard with **Tasks**, **Goals**, **Later**, and **Done**. List/detail screens use inline buttons for opening items, moving back, Done, Later, GitHub, and pagination.
+
+Goals do not require a new label or type. A goal is an Issue that acts as a real parent in the existing Issue hierarchy. The bot resolves relations from child `Parent: #N` metadata and parent checklist Issue references, then shows completed vs remaining child work directly in Telegram.
+
 Open Issues are active and closed Issues are done. The required bot-owned labels are:
 
 - `state:inbox`
