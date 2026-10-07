@@ -11,8 +11,10 @@ TITLE_LIMIT = 80
 
 _PARENT_RE = re.compile(r"(?mi)^\s*Parent:\s*#(\d+)\s*$")
 _CHECKLIST_CHILD_RE = re.compile(r"(?mi)^\s*-\s*\[[ x]\]\s*#(\d+)\b")
-_ORIGINAL_INPUT_HEADING = "## Original Telegram input"
+_ORIGINAL_INPUT_HEADING_RE = re.compile(r"(?m)^## Original Telegram input\s*$")
 _BOT_METADATA_MARKER = "<!-- life-ops"
+_METADATA_CHAT_ID_RE = re.compile(r"(?m)^telegram_chat_id:\s*(-?\d+)\s*$")
+_METADATA_MESSAGE_ID_RE = re.compile(r"(?m)^telegram_message_id:\s*(\d+)\s*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -106,10 +108,33 @@ def goal_children(issues: tuple[Issue, ...]) -> dict[int, tuple[Issue, ...]]:
 
 
 def _hierarchy_text(body: str) -> str:
-    stripped = body.lstrip()
-    if stripped.startswith(_ORIGINAL_INPUT_HEADING) and _BOT_METADATA_MARKER in body:
+    marker_index = body.rfind(_BOT_METADATA_MARKER)
+    original_heading = _ORIGINAL_INPUT_HEADING_RE.search(body)
+    if marker_index < 0 or original_heading is None:
+        return body
+
+    metadata = body[marker_index:]
+    chat_match = _METADATA_CHAT_ID_RE.search(metadata)
+    message_match = _METADATA_MESSAGE_ID_RE.search(metadata)
+    if chat_match is None or message_match is None:
         return ""
-    return body
+
+    chat_id = re.escape(chat_match.group(1))
+    message_id = re.escape(message_match.group(1))
+    source_re = re.compile(
+        rf"(?m)^## Telegram source\s*$\n\s*\n"
+        rf"- chat_id: `{chat_id}`\s*$\n"
+        rf"- message_id: `{message_id}`\s*$"
+    )
+    source_matches = list(source_re.finditer(body[:marker_index]))
+    if not source_matches:
+        return ""
+
+    source_start = source_matches[-1].start()
+    if source_start <= original_heading.start():
+        return ""
+
+    return body[: original_heading.start()] + body[source_start:]
 
 
 def make_title(text: str) -> str:

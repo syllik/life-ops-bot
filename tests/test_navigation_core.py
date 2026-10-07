@@ -37,10 +37,13 @@ def test_goal_children_ignores_hierarchy_like_text_in_original_telegram_input() 
             "## A heading from the captured message\n\n"
             "- [ ] #12 also captured text\n\n"
             "## Telegram source\n\n"
-            "- chat_id: `1`\n\n"
+            "- chat_id: `1`\n"
+            "- message_id: `7`\n\n"
             "<!-- life-ops\n"
             "schema: 1\n"
             "source: telegram\n"
+            "telegram_chat_id: 1\n"
+            "telegram_message_id: 7\n"
             "-->"
         ),
     )
@@ -50,16 +53,82 @@ def test_goal_children_ignores_hierarchy_like_text_in_original_telegram_input() 
             "## Original Telegram input\n\n"
             "- [ ] #11 looks like a task\n\n"
             "## Telegram source\n\n"
-            "- chat_id: `1`\n\n"
+            "- chat_id: `1`\n"
+            "- message_id: `8`\n\n"
             "<!-- life-ops\n"
             "schema: 1\n"
             "source: telegram\n"
+            "telegram_chat_id: 1\n"
+            "telegram_message_id: 8\n"
             "-->"
         ),
     )
     real_parent = issue(10)
 
     assert goal_children((real_parent, captured_child, captured_parent)) == {}
+
+
+def test_goal_children_parses_metadata_added_after_captured_source_region() -> None:
+    parent = issue(
+        10,
+        body=(
+            "## Original Telegram input\n\n"
+            "- [ ] #999 preserved only\n\n"
+            "## Telegram source\n\n"
+            "- chat_id: `1`\n"
+            "- message_id: `6`\n\n"
+            "<!-- life-ops\n"
+            "schema: 1\n"
+            "source: telegram\n"
+            "telegram_chat_id: 1\n"
+            "telegram_message_id: 6\n"
+            "-->\n\n"
+            "- [ ] #11 Real child"
+        ),
+    )
+    child = issue(
+        11,
+        body=(
+            "## Original Telegram input\n\n"
+            "Parent: #999\n\n"
+            "## Telegram source\n\n"
+            "- chat_id: `1`\n"
+            "- message_id: `7`\n\n"
+            "<!-- life-ops\n"
+            "schema: 1\n"
+            "source: telegram\n"
+            "telegram_chat_id: 1\n"
+            "telegram_message_id: 7\n"
+            "-->\n\n"
+            "Parent: #10"
+        ),
+    )
+
+    assert goal_children((parent, child)) == {10: (child,)}
+
+
+def test_goal_children_uses_last_matching_bot_source_boundary() -> None:
+    parent = issue(10)
+    child = issue(
+        11,
+        body=(
+            "## Original Telegram input\n\n"
+            "Parent: #10\n\n"
+            "## Telegram source\n\n"
+            "- chat_id: `1`\n"
+            "- message_id: `7`\n\n"
+            "Parent: #10\n\n"
+            "## Telegram source\n\n"
+            "- chat_id: `1`\n"
+            "- message_id: `7`\n\n"
+            "<!-- life-ops\n"
+            "telegram_chat_id: 1\n"
+            "telegram_message_id: 7\n"
+            "-->"
+        ),
+    )
+
+    assert goal_children((parent, child)) == {}
 
 
 def test_goal_children_parses_hierarchy_in_normal_issue_bodies() -> None:
