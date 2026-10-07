@@ -30,6 +30,7 @@ MENU_GOALS = "🎯 Goals"
 MENU_LATER = "🕓 Later"
 MENU_DONE = "✅ Done"
 PAGE_SIZE = 8
+CALLBACK_DATA_MAX_BYTES = 64
 VIEW_LABELS = {
     "tasks": "📋 Tasks",
     "goals": "🎯 Goals",
@@ -312,7 +313,9 @@ async def _edit_callback(
             reply_markup=markup,
             disable_web_page_preview=True,
         )
-    except TelegramBadRequest:
+    except TelegramBadRequest as exc:
+        if "message is not modified" in str(exc).lower():
+            return True
         await _answer_callback(callback, NAVIGATION_ERROR, show_alert=True)
         return False
     return True
@@ -464,7 +467,12 @@ def render_goal(
 
     done = sum(child.state == "closed" for child in children)
     remaining = len(children) - done
-    status = "✅ Done" if goal.state == "closed" else "🎯 Active"
+    if goal.state == "closed":
+        status = "✅ Done"
+    elif "state:later" in goal.labels:
+        status = "🕓 Later"
+    else:
+        status = "🎯 Active"
     page_items, current_page, page_count = _page(children, page)
     text = (
         f"🎯 #{goal.number} {goal.title}\n"
@@ -861,7 +869,23 @@ def _action_callback_data(
 def _with_trail(base: str, trail: tuple[tuple[int, int], ...]) -> str:
     if not trail:
         return base
-    encoded = ",".join(f"{goal_number}.{page}" for goal_number, page in trail)
+    if len(base.encode("utf-8")) > CALLBACK_DATA_MAX_BYTES:
+        raise ValueError("callback data base exceeds Telegram limit")
+
+    retained: list[tuple[int, int]] = []
+    for entry in reversed(trail):
+        candidate_entries = [entry, *retained]
+        encoded = ",".join(
+            f"{goal_number}.{page}" for goal_number, page in candidate_entries
+        )
+        candidate = f"{base}:{encoded}"
+        if len(candidate.encode("utf-8")) > CALLBACK_DATA_MAX_BYTES:
+            break
+        retained = candidate_entries
+
+    if not retained:
+        return base
+    encoded = ",".join(f"{goal_number}.{page}" for goal_number, page in retained)
     return f"{base}:{encoded}"
 
 

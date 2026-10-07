@@ -10,6 +10,7 @@ from life_ops_bot.telegram import (
     MENU_DONE,
     MENU_GOALS,
     MENU_LATER,
+    CALLBACK_DATA_MAX_BYTES,
     MENU_TASKS,
     NAVIGATION_ERROR,
     NavigationCallback,
@@ -225,13 +226,14 @@ def test_deferred_open_goal_hides_redundant_later_action() -> None:
     )
     child = issue(11, title="Child", body="Parent: #10")
 
-    _, markup = render_goal(
+    text, markup = render_goal(
         (parent, child),
         10,
         0,
         source_view="later",
     )
 
+    assert "Status: 🕓 Later" in text
     action_texts = [button.text for button in markup.inline_keyboard[-2]]
     assert action_texts == ["Done", "GitHub"]
 
@@ -528,6 +530,39 @@ def test_goal_child_pagination_preserves_source_goals_page() -> None:
     assert markup.inline_keyboard[-1][0].callback_data == "nav:goals:3"
 
 
+def test_deep_goal_breadcrumb_callbacks_stay_within_telegram_limit() -> None:
+    parent = issue(9999999, title="Deep goal", body="- [ ] #8888888 Child")
+    child = issue(8888888, title="Leaf", body="Parent: #9999999")
+    deep_trail = (
+        (1111111, 99),
+        (2222222, 99),
+        (3333333, 99),
+        (4444444, 99),
+        (5555555, 99),
+    )
+
+    _, markup = render_goal(
+        (parent, child),
+        9999999,
+        0,
+        source_view="goals",
+        source_page=99,
+        trail=deep_trail,
+    )
+
+    callback_data = [
+        button.callback_data
+        for row in markup.inline_keyboard
+        for button in row
+        if button.callback_data is not None
+    ]
+    assert callback_data
+    assert all(
+        len(data.encode("utf-8")) <= CALLBACK_DATA_MAX_BYTES for data in callback_data
+    )
+    assert any(data.startswith("goal:4444444") or "5555555.99" in data for data in callback_data)
+
+
 @pytest.mark.parametrize(
     ("data", "expected"),
     [
@@ -735,12 +770,26 @@ async def test_navigation_edit_bad_request_reports_error() -> None:
     callback = fake_callback(data="nav:tasks:0")
     callback.message.edit_text.side_effect = TelegramBadRequest(
         method=SimpleNamespace(),
-        message="message is not modified",
+        message="message can't be edited",
     )
 
     await handle_callback(callback, life_ops, 123)
 
     callback.answer.assert_awaited_once_with(NAVIGATION_ERROR, show_alert=True)
+
+
+@pytest.mark.asyncio
+async def test_navigation_not_modified_retry_is_treated_as_success() -> None:
+    life_ops = FakeLifeOps((issue(1),))
+    callback = fake_callback(data="nav:tasks:0")
+    callback.message.edit_text.side_effect = TelegramBadRequest(
+        method=SimpleNamespace(),
+        message="message is not modified",
+    )
+
+    await handle_callback(callback, life_ops, 123)
+
+    callback.answer.assert_awaited_once_with()
 
 
 @pytest.mark.asyncio
