@@ -7,10 +7,10 @@ from aiogram.exceptions import TelegramBadRequest
 from life_ops_bot.core import Capture, Issue
 from life_ops_bot.github import GitHubError
 from life_ops_bot.telegram import (
+    CALLBACK_DATA_MAX_BYTES,
     MENU_DONE,
     MENU_GOALS,
     MENU_LATER,
-    CALLBACK_DATA_MAX_BYTES,
     MENU_TASKS,
     NAVIGATION_ERROR,
     NavigationCallback,
