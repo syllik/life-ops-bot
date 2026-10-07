@@ -136,20 +136,18 @@ def test_main_menu_keyboard_exposes_all_views_without_typing_commands() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_shows_persistent_menu_and_active_tasks_without_capture() -> None:
+async def test_start_shows_persistent_menu_without_github_or_capture() -> None:
     life_ops = FakeLifeOps((issue(1),))
     message = fake_message(text="/start")
 
     await handle_message(message, life_ops, 123)
 
     assert life_ops.captures == []
-    assert life_ops.list_calls == 1
-    assert message.answer.await_count == 2
-    first = message.answer.await_args_list[0]
-    second = message.answer.await_args_list[1]
-    assert first.args[0].startswith("Life Ops")
-    assert first.kwargs["reply_markup"].is_persistent is True
-    assert second.args[0].startswith("📋 Tasks — 1")
+    assert life_ops.list_calls == 0
+    message.answer.assert_awaited_once()
+    reply = message.answer.await_args
+    assert reply.args[0].startswith("Life Ops")
+    assert reply.kwargs["reply_markup"].is_persistent is True
 
 
 @pytest.mark.asyncio
@@ -197,6 +195,45 @@ def test_tasks_goals_later_and_done_views_are_deterministic() -> None:
     assert later_markup.inline_keyboard[0][0].callback_data == "item:12:later:0"
     assert done_text.startswith("✅ Done — 1")
     assert done_markup.inline_keyboard[0][0].callback_data == "item:13:done:0"
+
+
+def test_deferred_goal_is_only_in_later_not_active_goals() -> None:
+    parent = issue(
+        10,
+        title="Deferred plan",
+        labels=("state:later",),
+        body="- [ ] #11 Child",
+    )
+    child = issue(11, title="Child", body="Parent: #10")
+    issues = (parent, child)
+
+    goals_text, goals_markup = render_view(issues, "goals", 0)
+    later_text, later_markup = render_view(issues, "later", 0)
+
+    assert goals_text == "🎯 Goals\nNo active goals."
+    assert goals_markup is None
+    assert later_text.startswith("🕓 Later — 1")
+    assert later_markup.inline_keyboard[0][0].callback_data == "goal:10:later:0:0"
+
+
+def test_deferred_open_goal_hides_redundant_later_action() -> None:
+    parent = issue(
+        10,
+        title="Deferred plan",
+        labels=("state:later",),
+        body="- [ ] #11 Child",
+    )
+    child = issue(11, title="Child", body="Parent: #10")
+
+    _, markup = render_goal(
+        (parent, child),
+        10,
+        0,
+        source_view="later",
+    )
+
+    action_texts = [button.text for button in markup.inline_keyboard[-2]]
+    assert action_texts == ["Done", "GitHub"]
 
 
 def test_view_paginates_and_clamps_out_of_range_page() -> None:
@@ -349,18 +386,18 @@ async def test_forwarded_start_text_stays_on_capture_path() -> None:
 
 
 @pytest.mark.asyncio
-async def test_start_retryable_read_fails_before_any_telegram_reply() -> None:
+async def test_start_does_not_touch_github_even_in_webhook_mode() -> None:
     message = fake_message(text="/start")
+    life_ops = FailingLifeOps(retryable=True)
 
-    with pytest.raises(GitHubError, match="failed"):
-        await handle_message(
-            message,
-            FailingLifeOps(retryable=True),
-            123,
-            propagate_github_errors=True,
-        )
+    await handle_message(
+        message,
+        life_ops,
+        123,
+        propagate_github_errors=True,
+    )
 
-    message.answer.assert_not_awaited()
+    message.answer.assert_awaited_once()
 
 
 def test_goal_open_preserves_source_goals_page_separately_from_children_page() -> None:
@@ -389,6 +426,55 @@ def test_goal_open_preserves_source_goals_page_separately_from_children_page() -
         source_page=1,
     )
     assert goal_markup.inline_keyboard[-1][0].callback_data == "nav:goals:1"
+
+
+def test_nested_child_goal_opens_goal_detail_and_backs_to_parent_detail() -> None:
+    root = issue(10, title="Root", body="- [ ] #11 Nested")
+    nested = issue(
+        11,
+        title="Nested",
+        body="Parent: #10\n\n- [ ] #12 Leaf",
+    )
+    leaf = issue(12, title="Leaf", body="Parent: #11")
+    issues = (root, nested, leaf)
+
+    _, root_markup = render_goal(issues, 10, 0)
+
+    assert root_markup.inline_keyboard[0][0].callback_data == (
+        "goal:11:goals:0:0:10.0"
+    )
+
+    _, nested_markup = render_goal(
+        issues,
+        11,
+        0,
+        trail=((10, 0),),
+    )
+
+    assert nested_markup.inline_keyboard[0][0].callback_data == (
+        "item:12:g11:goals:0:0:10.0"
+    )
+    assert nested_markup.inline_keyboard[-1][0].callback_data == (
+        "goal:10:goals:0:0"
+    )
+
+
+def test_nested_goal_item_round_trip_preserves_breadcrumb() -> None:
+    current = issue(12, title="Leaf")
+
+    _, markup = render_item(
+        current,
+        "g11",
+        0,
+        trail=((10, 0),),
+    )
+
+    assert markup.inline_keyboard[0][0].callback_data == (
+        "action:done:12:g11:goals:0:0:10.0"
+    )
+    assert markup.inline_keyboard[1][0].callback_data == (
+        "goal:11:goals:0:0:10.0"
+    )
 
 
 def test_completed_goal_in_done_opens_goal_detail_and_returns_to_done() -> None:
@@ -462,6 +548,17 @@ def test_goal_child_pagination_preserves_source_goals_page() -> None:
             ),
         ),
         (
+            "goal:18:done:3:2:10.0,11.1",
+            NavigationCallback(
+                kind="goal",
+                issue_number=18,
+                page=2,
+                source_page=3,
+                source_view="done",
+                trail=((10, 0), (11, 1)),
+            ),
+        ),
+        (
             "item:22:g18:done:3:1",
             NavigationCallback(
                 kind="item",
@@ -482,6 +579,19 @@ def test_goal_child_pagination_preserves_source_goals_page() -> None:
                 page=1,
                 source_page=3,
                 source_view="done",
+            ),
+        ),
+        (
+            "action:later:22:g18:done:3:1:10.0",
+            NavigationCallback(
+                kind="action",
+                issue_number=22,
+                view="g18",
+                action="later",
+                page=1,
+                source_page=3,
+                source_view="done",
+                trail=((10, 0),),
             ),
         ),
         (
@@ -526,6 +636,8 @@ def test_goal_child_pagination_preserves_source_goals_page() -> None:
         ("goal:2:-1", None),
         ("action:nope:2:tasks:0", None),
         ("action:done:x:tasks:0", None),
+        ("goal:2:goals:0:0:bad", None),
+        ("goal:2:goals:0:0:0.0", None),
         (None, None),
     ],
 )

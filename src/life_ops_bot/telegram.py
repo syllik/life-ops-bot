@@ -50,6 +50,7 @@ class NavigationCallback:
     page: int = 0
     source_page: int = 0
     source_view: str = "goals"
+    trail: tuple[tuple[int, int], ...] = ()
     issue_number: int | None = None
     view: str | None = None
     action: str | None = None
@@ -100,23 +101,9 @@ async def handle_message(
         return
 
     if message.forward_origin is None and _is_start(text):
-        try:
-            issues = await life_ops.list_issues()
-        except GitHubError as exc:
-            if propagate_github_errors and exc.retryable:
-                raise
-            await message.answer(NAVIGATION_ERROR)
-            return
-
-        view_text, view_markup = render_view(issues, "tasks", 0)
         await message.answer(
             "Life Ops\nUse the buttons below instead of commands.",
             reply_markup=main_menu_keyboard(),
-        )
-        await message.answer(
-            view_text,
-            reply_markup=view_markup,
-            disable_web_page_preview=True,
         )
         return
 
@@ -220,6 +207,7 @@ async def _handle_navigation_callback(
                 navigation.page,
                 source_page=navigation.source_page,
                 source_view=navigation.source_view,
+                trail=navigation.trail,
             )
         elif (
             navigation.kind == "item"
@@ -233,6 +221,7 @@ async def _handle_navigation_callback(
                 navigation.page,
                 source_page=navigation.source_page,
                 source_view=navigation.source_view,
+                trail=navigation.trail,
             )
         elif (
             navigation.kind == "action"
@@ -252,6 +241,7 @@ async def _handle_navigation_callback(
                     navigation.page,
                     source_page=navigation.source_page,
                     source_view=navigation.source_view,
+                    trail=navigation.trail,
                 )
             else:
                 text, markup = render_item(
@@ -260,6 +250,7 @@ async def _handle_navigation_callback(
                     navigation.page,
                     source_page=navigation.source_page,
                     source_view=navigation.source_view,
+                    trail=navigation.trail,
                 )
         else:
             await _answer_callback(callback, ACTION_ERROR, show_alert=True)
@@ -406,7 +397,11 @@ def render_view(
         empty_text = "No active tasks."
     elif view == "goals":
         items = [
-            issue for issue in issues if issue.state == "open" and issue.number in goal_numbers
+            issue
+            for issue in issues
+            if issue.state == "open"
+            and issue.number in goal_numbers
+            and "state:later" not in issue.labels
         ]
         empty_text = "No active goals."
     elif view == "later":
@@ -432,7 +427,13 @@ def render_view(
             children = relations[issue.number]
             done = sum(child.state == "closed" for child in children)
             label = f"🎯 #{issue.number} {_short_title(issue.title, 34)} · {done}/{len(children)}"
-            callback_data = f"goal:{issue.number}:{view}:{current_page}:0"
+            callback_data = _goal_callback_data(
+                issue.number,
+                view,
+                current_page,
+                0,
+                (),
+            )
         else:
             icon = _status_icon(issue)
             label = f"{icon} #{issue.number} {_short_title(issue.title, 45)}"
@@ -452,6 +453,7 @@ def render_goal(
     *,
     source_page: int = 0,
     source_view: str = "goals",
+    trail: tuple[tuple[int, int], ...] = (),
 ) -> tuple[str, InlineKeyboardMarkup]:
     by_number = {issue.number: issue for issue in issues}
     goal = by_number.get(goal_number)
@@ -472,17 +474,31 @@ def render_goal(
 
     rows: list[list[InlineKeyboardButton]] = []
     for child in page_items:
-        rows.append(
-            [
-                InlineKeyboardButton(
-                    text=f"{_status_icon(child)} #{child.number} {_short_title(child.title, 43)}",
-                    callback_data=(
-                        f"item:{child.number}:g{goal.number}:{source_view}:{source_page}:"
-                        f"{current_page}"
-                    ),
-                )
-            ]
-        )
+        if child.number in relations:
+            nested_children = relations[child.number]
+            nested_done = sum(item.state == "closed" for item in nested_children)
+            label = (
+                f"🎯 #{child.number} {_short_title(child.title, 34)} · "
+                f"{nested_done}/{len(nested_children)}"
+            )
+            callback_data = _goal_callback_data(
+                child.number,
+                source_view,
+                source_page,
+                0,
+                (*trail, (goal.number, current_page)),
+            )
+        else:
+            label = f"{_status_icon(child)} #{child.number} {_short_title(child.title, 43)}"
+            callback_data = _item_callback_data(
+                child.number,
+                f"g{goal.number}",
+                source_view,
+                source_page,
+                current_page,
+                trail,
+            )
+        rows.append([InlineKeyboardButton(text=label, callback_data=callback_data)])
 
     if page_count > 1:
         row: list[InlineKeyboardButton] = []
@@ -490,9 +506,12 @@ def render_goal(
             row.append(
                 InlineKeyboardButton(
                     text="◀️",
-                    callback_data=(
-                        f"goal:{goal.number}:{source_view}:{source_page}:"
-                        f"{current_page - 1}"
+                    callback_data=_goal_callback_data(
+                        goal.number,
+                        source_view,
+                        source_page,
+                        current_page - 1,
+                        trail,
                     ),
                 )
             )
@@ -506,9 +525,12 @@ def render_goal(
             row.append(
                 InlineKeyboardButton(
                     text="▶️",
-                    callback_data=(
-                        f"goal:{goal.number}:{source_view}:{source_page}:"
-                        f"{current_page + 1}"
+                    callback_data=_goal_callback_data(
+                        goal.number,
+                        source_view,
+                        source_page,
+                        current_page + 1,
+                        trail,
                     ),
                 )
             )
@@ -519,31 +541,46 @@ def render_goal(
         action_row.append(
             InlineKeyboardButton(
                 text="Done",
-                callback_data=(
-                    f"action:done:{goal.number}:goal:{source_view}:{source_page}:"
-                    f"{current_page}"
+                callback_data=_action_callback_data(
+                    "done",
+                    goal.number,
+                    "goal",
+                    current_page,
+                    source_page,
+                    source_view,
+                    trail,
                 ),
             )
         )
-    action_row.append(
-        InlineKeyboardButton(
-            text="Later",
-            callback_data=(
-                f"action:later:{goal.number}:goal:{source_view}:{source_page}:"
-                f"{current_page}"
-            ),
+    if "state:later" not in goal.labels or goal.state == "closed":
+        action_row.append(
+            InlineKeyboardButton(
+                text="Later",
+                callback_data=_action_callback_data(
+                    "later",
+                    goal.number,
+                    "goal",
+                    current_page,
+                    source_page,
+                    source_view,
+                    trail,
+                ),
+            )
         )
-    )
     action_row.append(InlineKeyboardButton(text="GitHub", url=goal.url))
     rows.append(action_row)
-    rows.append(
-        [
-            InlineKeyboardButton(
-                text="← Back",
-                callback_data=f"nav:{source_view}:{source_page}",
-            )
-        ]
-    )
+    if trail:
+        parent_goal_number, parent_page = trail[-1]
+        back_data = _goal_callback_data(
+            parent_goal_number,
+            source_view,
+            source_page,
+            parent_page,
+            trail[:-1],
+        )
+    else:
+        back_data = f"nav:{source_view}:{source_page}"
+    rows.append([InlineKeyboardButton(text="← Back", callback_data=back_data)])
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -554,6 +591,7 @@ def render_item(
     *,
     source_page: int = 0,
     source_view: str = "goals",
+    trail: tuple[tuple[int, int], ...] = (),
 ) -> tuple[str, InlineKeyboardMarkup]:
     if issue.state == "closed":
         status = "✅ Done"
@@ -575,6 +613,7 @@ def render_item(
                     page,
                     source_page,
                     source_view,
+                    trail,
                 ),
             )
         )
@@ -589,13 +628,20 @@ def render_item(
                     page,
                     source_page,
                     source_view,
+                    trail,
                 ),
             )
         )
     action_row.append(InlineKeyboardButton(text="GitHub", url=issue.url))
 
     if context.startswith("g") and context[1:].isdigit():
-        back_data = f"goal:{int(context[1:])}:{source_view}:{source_page}:{page}"
+        back_data = _goal_callback_data(
+            int(context[1:]),
+            source_view,
+            source_page,
+            page,
+            trail,
+        )
     elif context in VIEW_LABELS:
         back_data = f"nav:{context}:{page}"
     else:
@@ -620,16 +666,18 @@ def parse_navigation_callback(data: str | None) -> NavigationCallback | None:
         if len(parts) == 3 and parts[0] == "nav" and parts[1] in VIEW_LABELS:
             page = int(parts[2])
             return _navigation_callback(kind="nav", view=parts[1], page=page)
-        if len(parts) == 5 and parts[0] == "goal" and parts[2] in VIEW_LABELS:
+        if len(parts) in {5, 6} and parts[0] == "goal" and parts[2] in VIEW_LABELS:
             issue_number = int(parts[1])
             source_page = int(parts[3])
             page = int(parts[4])
+            trail = _parse_trail(parts[5]) if len(parts) == 6 else ()
             return _navigation_callback(
                 kind="goal",
                 issue_number=issue_number,
                 page=page,
                 source_page=source_page,
                 source_view=parts[2],
+                trail=trail,
             )
         if len(parts) == 4 and parts[0] == "goal":
             issue_number = int(parts[1])
@@ -645,10 +693,11 @@ def parse_navigation_callback(data: str | None) -> NavigationCallback | None:
             issue_number = int(parts[1])
             page = int(parts[2])
             return _navigation_callback(kind="goal", issue_number=issue_number, page=page)
-        if len(parts) == 6 and parts[0] == "item" and parts[3] in VIEW_LABELS:
+        if len(parts) in {6, 7} and parts[0] == "item" and parts[3] in VIEW_LABELS:
             issue_number = int(parts[1])
             source_page = int(parts[4])
             page = int(parts[5])
+            trail = _parse_trail(parts[6]) if len(parts) == 7 else ()
             return _navigation_callback(
                 kind="item",
                 issue_number=issue_number,
@@ -656,6 +705,7 @@ def parse_navigation_callback(data: str | None) -> NavigationCallback | None:
                 page=page,
                 source_page=source_page,
                 source_view=parts[3],
+                trail=trail,
             )
         if len(parts) == 5 and parts[0] == "item":
             issue_number = int(parts[1])
@@ -678,7 +728,7 @@ def parse_navigation_callback(data: str | None) -> NavigationCallback | None:
                 page=page,
             )
         if (
-            len(parts) == 7
+            len(parts) in {7, 8}
             and parts[0] == "action"
             and parts[1] in {"done", "later"}
             and parts[4] in VIEW_LABELS
@@ -686,6 +736,7 @@ def parse_navigation_callback(data: str | None) -> NavigationCallback | None:
             issue_number = int(parts[2])
             source_page = int(parts[5])
             page = int(parts[6])
+            trail = _parse_trail(parts[7]) if len(parts) == 8 else ()
             return _navigation_callback(
                 kind="action",
                 issue_number=issue_number,
@@ -694,6 +745,7 @@ def parse_navigation_callback(data: str | None) -> NavigationCallback | None:
                 page=page,
                 source_page=source_page,
                 source_view=parts[4],
+                trail=trail,
             )
         if (
             len(parts) == 6
@@ -736,6 +788,7 @@ def _navigation_callback(
     page: int,
     source_page: int = 0,
     source_view: str = "goals",
+    trail: tuple[tuple[int, int], ...] = (),
     issue_number: int | None = None,
     view: str | None = None,
     action: str | None = None,
@@ -757,10 +810,34 @@ def _navigation_callback(
         page=page,
         source_page=source_page,
         source_view=source_view,
+        trail=trail,
         issue_number=issue_number,
         view=view,
         action=action,
     )
+
+
+def _goal_callback_data(
+    goal_number: int,
+    source_view: str,
+    source_page: int,
+    page: int,
+    trail: tuple[tuple[int, int], ...],
+) -> str:
+    base = f"goal:{goal_number}:{source_view}:{source_page}:{page}"
+    return _with_trail(base, trail)
+
+
+def _item_callback_data(
+    issue_number: int,
+    context: str,
+    source_view: str,
+    source_page: int,
+    page: int,
+    trail: tuple[tuple[int, int], ...],
+) -> str:
+    base = f"item:{issue_number}:{context}:{source_view}:{source_page}:{page}"
+    return _with_trail(base, trail)
 
 
 def _action_callback_data(
@@ -770,13 +847,38 @@ def _action_callback_data(
     page: int,
     source_page: int,
     source_view: str,
+    trail: tuple[tuple[int, int], ...],
 ) -> str:
     if context == "goal" or (context.startswith("g") and context[1:].isdigit()):
-        return (
+        base = (
             f"action:{action}:{issue_number}:{context}:{source_view}:"
             f"{source_page}:{page}"
         )
+        return _with_trail(base, trail)
     return f"action:{action}:{issue_number}:{context}:{page}"
+
+
+def _with_trail(base: str, trail: tuple[tuple[int, int], ...]) -> str:
+    if not trail:
+        return base
+    encoded = ",".join(f"{goal_number}.{page}" for goal_number, page in trail)
+    return f"{base}:{encoded}"
+
+
+def _parse_trail(raw: str) -> tuple[tuple[int, int], ...]:
+    if not raw:
+        raise ValueError("empty trail")
+    result: list[tuple[int, int]] = []
+    for entry in raw.split(","):
+        goal, separator, page = entry.partition(".")
+        if separator != ".":
+            raise ValueError("invalid trail")
+        goal_number = int(goal)
+        page_number = int(page)
+        if goal_number <= 0 or page_number < 0:
+            raise ValueError("invalid trail")
+        result.append((goal_number, page_number))
+    return tuple(result)
 
 
 def _page(items: list[Issue], requested_page: int) -> tuple[list[Issue], int, int]:
