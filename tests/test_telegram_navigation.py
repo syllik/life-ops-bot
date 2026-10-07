@@ -98,14 +98,19 @@ class FakeLifeOps:
         self.issues = [updated if item.number == updated.number else item for item in self.issues]
 
 
-def fake_message(*, user_id: int = 123, text: str | None = MENU_TASKS):
+def fake_message(
+    *,
+    user_id: int = 123,
+    text: str | None = MENU_TASKS,
+    forward_origin=None,
+):
     return SimpleNamespace(
         from_user=SimpleNamespace(id=user_id),
         text=text,
         entities=None,
         chat=SimpleNamespace(id=user_id),
         message_id=7,
-        forward_origin=None,
+        forward_origin=forward_origin,
         answer=AsyncMock(),
     )
 
@@ -221,7 +226,7 @@ def test_goal_detail_shows_progress_children_actions_and_back() -> None:
     assert "Progress: 1/2 done · 1 remaining" in text
     assert markup.inline_keyboard[0][0].text.startswith("⬜ #11")
     assert markup.inline_keyboard[1][0].text.startswith("✅ #12")
-    assert markup.inline_keyboard[-2][0].callback_data == "action:done:10:goal:0"
+    assert markup.inline_keyboard[-2][0].callback_data == "action:done:10:goal:0:0"
     assert markup.inline_keyboard[-1][0].callback_data == "nav:goals:0"
 
 
@@ -231,8 +236,8 @@ def test_item_detail_reflects_status_and_returns_to_goal() -> None:
     text, markup = render_item(current, "g10", 2)
 
     assert "Status: ✅ Done" in text
-    assert markup.inline_keyboard[0][0].callback_data == "action:later:11:g10:2"
-    assert markup.inline_keyboard[1][0].callback_data == "goal:10:2"
+    assert markup.inline_keyboard[0][0].callback_data == "action:later:11:g10:0:2"
+    assert markup.inline_keyboard[1][0].callback_data == "goal:10:0:2"
 
 
 @pytest.mark.asyncio
@@ -309,11 +314,109 @@ async def test_unauthorized_navigation_callback_has_no_side_effects() -> None:
     callback.answer.assert_not_awaited()
 
 
+@pytest.mark.asyncio
+async def test_forwarded_start_text_stays_on_capture_path() -> None:
+    life_ops = FakeLifeOps()
+    message = fake_message(
+        text="/start this is forwarded content",
+        forward_origin=SimpleNamespace(),
+    )
+
+    await handle_message(message, life_ops, 123)
+
+    assert len(life_ops.captures) == 1
+    assert life_ops.captures[0].text == "/start this is forwarded content"
+    assert message.answer.await_count == 1
+    assert message.answer.await_args.args[0].startswith("✅ Saved #99")
+
+
+@pytest.mark.asyncio
+async def test_start_retryable_read_fails_before_any_telegram_reply() -> None:
+    message = fake_message(text="/start")
+
+    with pytest.raises(GitHubError, match="failed"):
+        await handle_message(
+            message,
+            FailingLifeOps(retryable=True),
+            123,
+            propagate_github_errors=True,
+        )
+
+    message.answer.assert_not_awaited()
+
+
+def test_goal_open_preserves_source_goals_page_separately_from_children_page() -> None:
+    parents = tuple(
+        issue(
+            number,
+            title=f"Goal {number}",
+            body=f"- [ ] #{number + 100} Child",
+        )
+        for number in range(1, 10)
+    )
+    children = tuple(
+        issue(number + 100, title=f"Child {number}", body=f"Parent: #{number}")
+        for number in range(1, 10)
+    )
+
+    _, goals_markup = render_view((*parents, *children), "goals", 1)
+    goal_button = goals_markup.inline_keyboard[0][0]
+
+    assert goal_button.callback_data == "goal:9:1:0"
+
+    _, goal_markup = render_goal(
+        (*parents, *children),
+        9,
+        0,
+        source_page=1,
+    )
+    assert goal_markup.inline_keyboard[-1][0].callback_data == "nav:goals:1"
+
+
+def test_goal_child_pagination_preserves_source_goals_page() -> None:
+    parent = issue(
+        10,
+        title="Plan",
+        body="\n".join(f"- [ ] #{number} Child" for number in range(11, 21)),
+    )
+    children = tuple(issue(number) for number in range(11, 21))
+
+    _, markup = render_goal((parent, *children), 10, 0, source_page=3)
+
+    assert markup.inline_keyboard[8][1].callback_data == "goal:10:3:1"
+    assert markup.inline_keyboard[-1][0].callback_data == "nav:goals:3"
+
+
 @pytest.mark.parametrize(
     ("data", "expected"),
     [
         ("nav:tasks:0", NavigationCallback(kind="nav", view="tasks", page=0)),
         ("goal:18:2", NavigationCallback(kind="goal", issue_number=18, page=2)),
+        (
+            "goal:18:3:2",
+            NavigationCallback(kind="goal", issue_number=18, page=2, source_page=3),
+        ),
+        (
+            "item:22:g18:3:1",
+            NavigationCallback(
+                kind="item",
+                issue_number=22,
+                view="g18",
+                page=1,
+                source_page=3,
+            ),
+        ),
+        (
+            "action:done:22:goal:3:1",
+            NavigationCallback(
+                kind="action",
+                issue_number=22,
+                view="goal",
+                action="done",
+                page=1,
+                source_page=3,
+            ),
+        ),
         (
             "item:22:g18:1",
             NavigationCallback(kind="item", issue_number=22, view="g18", page=1),
@@ -472,9 +575,9 @@ def test_goal_detail_paginates_children_in_both_directions_and_closed_goal() -> 
 
     assert "Status: ✅ Done" in first_text
     assert first_markup.inline_keyboard[8][0].text == "1/2"
-    assert first_markup.inline_keyboard[8][1].callback_data == "goal:10:1"
+    assert first_markup.inline_keyboard[8][1].callback_data == "goal:10:0:1"
     assert "Page" not in second_text
-    assert second_markup.inline_keyboard[2][0].callback_data == "goal:10:0"
+    assert second_markup.inline_keyboard[2][0].callback_data == "goal:10:0:0"
     action_texts = [button.text for button in second_markup.inline_keyboard[-2]]
     assert "Done" not in action_texts
 

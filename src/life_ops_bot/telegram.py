@@ -48,6 +48,7 @@ MENU_VIEWS = {
 class NavigationCallback:
     kind: str
     page: int = 0
+    source_page: int = 0
     issue_number: int | None = None
     view: str | None = None
     action: str | None = None
@@ -97,17 +98,24 @@ async def handle_message(
     if text is None:
         return
 
-    if _is_start(text):
+    if message.forward_origin is None and _is_start(text):
+        try:
+            issues = await life_ops.list_issues()
+        except GitHubError as exc:
+            if propagate_github_errors and exc.retryable:
+                raise
+            await message.answer(NAVIGATION_ERROR)
+            return
+
+        view_text, view_markup = render_view(issues, "tasks", 0)
         await message.answer(
             "Life Ops\nUse the buttons below instead of commands.",
             reply_markup=main_menu_keyboard(),
         )
-        await _send_view(
-            message,
-            life_ops,
-            "tasks",
-            0,
-            propagate_github_errors=propagate_github_errors,
+        await message.answer(
+            view_text,
+            reply_markup=view_markup,
+            disable_web_page_preview=True,
         )
         return
 
@@ -205,14 +213,24 @@ async def _handle_navigation_callback(
             text, markup = render_view(issues, navigation.view, navigation.page)
         elif navigation.kind == "goal" and navigation.issue_number is not None:
             issues = await life_ops.list_issues()
-            text, markup = render_goal(issues, navigation.issue_number, navigation.page)
+            text, markup = render_goal(
+                issues,
+                navigation.issue_number,
+                navigation.page,
+                source_page=navigation.source_page,
+            )
         elif (
             navigation.kind == "item"
             and navigation.issue_number is not None
             and navigation.view is not None
         ):
             issue = await life_ops.get_issue(navigation.issue_number)
-            text, markup = render_item(issue, navigation.view, navigation.page)
+            text, markup = render_item(
+                issue,
+                navigation.view,
+                navigation.page,
+                source_page=navigation.source_page,
+            )
         elif (
             navigation.kind == "action"
             and navigation.issue_number is not None
@@ -225,9 +243,19 @@ async def _handle_navigation_callback(
             issue = await operation(navigation.issue_number)
             if navigation.view == "goal":
                 issues = await life_ops.list_issues()
-                text, markup = render_goal(issues, issue.number, navigation.page)
+                text, markup = render_goal(
+                    issues,
+                    issue.number,
+                    navigation.page,
+                    source_page=navigation.source_page,
+                )
             else:
-                text, markup = render_item(issue, navigation.view, navigation.page)
+                text, markup = render_item(
+                    issue,
+                    navigation.view,
+                    navigation.page,
+                    source_page=navigation.source_page,
+                )
         else:
             await _answer_callback(callback, ACTION_ERROR, show_alert=True)
             return
@@ -399,7 +427,7 @@ def render_view(
             children = relations[issue.number]
             done = sum(child.state == "closed" for child in children)
             label = f"🎯 #{issue.number} {_short_title(issue.title, 34)} · {done}/{len(children)}"
-            callback_data = f"goal:{issue.number}:{current_page}"
+            callback_data = f"goal:{issue.number}:{current_page}:0"
         else:
             icon = _status_icon(issue)
             label = f"{icon} #{issue.number} {_short_title(issue.title, 45)}"
@@ -416,6 +444,8 @@ def render_goal(
     issues: tuple[Issue, ...],
     goal_number: int,
     page: int,
+    *,
+    source_page: int = 0,
 ) -> tuple[str, InlineKeyboardMarkup]:
     by_number = {issue.number: issue for issue in issues}
     goal = by_number.get(goal_number)
@@ -440,7 +470,9 @@ def render_goal(
             [
                 InlineKeyboardButton(
                     text=f"{_status_icon(child)} #{child.number} {_short_title(child.title, 43)}",
-                    callback_data=f"item:{child.number}:g{goal.number}:{current_page}",
+                    callback_data=(
+                        f"item:{child.number}:g{goal.number}:{source_page}:{current_page}"
+                    ),
                 )
             ]
         )
@@ -451,7 +483,9 @@ def render_goal(
             row.append(
                 InlineKeyboardButton(
                     text="◀️",
-                    callback_data=f"goal:{goal.number}:{current_page - 1}",
+                    callback_data=(
+                        f"goal:{goal.number}:{source_page}:{current_page - 1}"
+                    ),
                 )
             )
         row.append(
@@ -464,7 +498,9 @@ def render_goal(
             row.append(
                 InlineKeyboardButton(
                     text="▶️",
-                    callback_data=f"goal:{goal.number}:{current_page + 1}",
+                    callback_data=(
+                        f"goal:{goal.number}:{source_page}:{current_page + 1}"
+                    ),
                 )
             )
         rows.append(row)
@@ -474,22 +510,39 @@ def render_goal(
         action_row.append(
             InlineKeyboardButton(
                 text="Done",
-                callback_data=f"action:done:{goal.number}:goal:{current_page}",
+                callback_data=(
+                    f"action:done:{goal.number}:goal:{source_page}:{current_page}"
+                ),
             )
         )
     action_row.append(
         InlineKeyboardButton(
             text="Later",
-            callback_data=f"action:later:{goal.number}:goal:{current_page}",
+            callback_data=(
+                f"action:later:{goal.number}:goal:{source_page}:{current_page}"
+            ),
         )
     )
     action_row.append(InlineKeyboardButton(text="GitHub", url=goal.url))
     rows.append(action_row)
-    rows.append([InlineKeyboardButton(text="← Back", callback_data="nav:goals:0")])
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="← Back",
+                callback_data=f"nav:goals:{source_page}",
+            )
+        ]
+    )
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def render_item(issue: Issue, context: str, page: int) -> tuple[str, InlineKeyboardMarkup]:
+def render_item(
+    issue: Issue,
+    context: str,
+    page: int,
+    *,
+    source_page: int = 0,
+) -> tuple[str, InlineKeyboardMarkup]:
     if issue.state == "closed":
         status = "✅ Done"
     elif "state:later" in issue.labels:
@@ -503,20 +556,32 @@ def render_item(issue: Issue, context: str, page: int) -> tuple[str, InlineKeybo
         action_row.append(
             InlineKeyboardButton(
                 text="Done",
-                callback_data=f"action:done:{issue.number}:{context}:{page}",
+                callback_data=_action_callback_data(
+                    "done",
+                    issue.number,
+                    context,
+                    page,
+                    source_page,
+                ),
             )
         )
     if "state:later" not in issue.labels or issue.state == "closed":
         action_row.append(
             InlineKeyboardButton(
                 text="Later",
-                callback_data=f"action:later:{issue.number}:{context}:{page}",
+                callback_data=_action_callback_data(
+                    "later",
+                    issue.number,
+                    context,
+                    page,
+                    source_page,
+                ),
             )
         )
     action_row.append(InlineKeyboardButton(text="GitHub", url=issue.url))
 
     if context.startswith("g") and context[1:].isdigit():
-        back_data = f"goal:{int(context[1:])}:{page}"
+        back_data = f"goal:{int(context[1:])}:{source_page}:{page}"
     elif context in VIEW_LABELS:
         back_data = f"nav:{context}:{page}"
     else:
@@ -541,10 +606,31 @@ def parse_navigation_callback(data: str | None) -> NavigationCallback | None:
         if len(parts) == 3 and parts[0] == "nav" and parts[1] in VIEW_LABELS:
             page = int(parts[2])
             return _navigation_callback(kind="nav", view=parts[1], page=page)
+        if len(parts) == 4 and parts[0] == "goal":
+            issue_number = int(parts[1])
+            source_page = int(parts[2])
+            page = int(parts[3])
+            return _navigation_callback(
+                kind="goal",
+                issue_number=issue_number,
+                page=page,
+                source_page=source_page,
+            )
         if len(parts) == 3 and parts[0] == "goal":
             issue_number = int(parts[1])
             page = int(parts[2])
             return _navigation_callback(kind="goal", issue_number=issue_number, page=page)
+        if len(parts) == 5 and parts[0] == "item":
+            issue_number = int(parts[1])
+            source_page = int(parts[3])
+            page = int(parts[4])
+            return _navigation_callback(
+                kind="item",
+                issue_number=issue_number,
+                view=parts[2],
+                page=page,
+                source_page=source_page,
+            )
         if len(parts) == 4 and parts[0] == "item":
             issue_number = int(parts[1])
             page = int(parts[3])
@@ -553,6 +639,22 @@ def parse_navigation_callback(data: str | None) -> NavigationCallback | None:
                 issue_number=issue_number,
                 view=parts[2],
                 page=page,
+            )
+        if (
+            len(parts) == 6
+            and parts[0] == "action"
+            and parts[1] in {"done", "later"}
+        ):
+            issue_number = int(parts[2])
+            source_page = int(parts[4])
+            page = int(parts[5])
+            return _navigation_callback(
+                kind="action",
+                issue_number=issue_number,
+                view=parts[3],
+                action=parts[1],
+                page=page,
+                source_page=source_page,
             )
         if (
             len(parts) == 5
@@ -577,11 +679,12 @@ def _navigation_callback(
     *,
     kind: str,
     page: int,
+    source_page: int = 0,
     issue_number: int | None = None,
     view: str | None = None,
     action: str | None = None,
 ) -> NavigationCallback | None:
-    if page < 0 or issue_number is not None and issue_number <= 0:
+    if page < 0 or source_page < 0 or (issue_number is not None and issue_number <= 0):
         return None
     if kind in {"item", "action"} and view is not None:
         if view not in VIEW_LABELS and view != "goal" and not (
@@ -591,10 +694,23 @@ def _navigation_callback(
     return NavigationCallback(
         kind=kind,
         page=page,
+        source_page=source_page,
         issue_number=issue_number,
         view=view,
         action=action,
     )
+
+
+def _action_callback_data(
+    action: str,
+    issue_number: int,
+    context: str,
+    page: int,
+    source_page: int,
+) -> str:
+    if context == "goal" or (context.startswith("g") and context[1:].isdigit()):
+        return f"action:{action}:{issue_number}:{context}:{source_page}:{page}"
+    return f"action:{action}:{issue_number}:{context}:{page}"
 
 
 def _page(items: list[Issue], requested_page: int) -> tuple[list[Issue], int, int]:
